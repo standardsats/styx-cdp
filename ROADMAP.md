@@ -14,8 +14,9 @@ green. Statuses: [ ] planned, [x] done.
   as a Result (duplicate/negated oracle keys, asset collisions). Stale pins are
   unrepresentable: `Artifacts::compile` wires every pin from the just-compiled sibling;
   checking against published artifacts is deploy tooling (M11).
-- [ ] **M3 - witness encoders (type conformance).** `ToSimf` layer, the three op enums and their
-  total lowerings; every variant type-checks against the covenant's declared witness type.
+- [x] **M3 - witness encoders (type conformance).** `ToSimf` layer, the three op enums and their
+  total lowerings; the OP sum types equal the covenant-declared witness types, and every
+  variant satisfies its covenant.
 - [ ] **M4 - prune harness + POKE + OPEN.** Testkit (deploy fixture, chain-state factory,
   tamper, accept/reject asserts); the smallest op proves the build -> sign -> finalize pipeline
   end to end; OPEN ports the borrow-fee probes.

@@ -25,12 +25,19 @@
           pkgs.rustc
           pkgs.cargo
           pkgs.clippy
+          pkgs.rustfmt
+          pkgs.cargo-llvm-cov
           pkgs.gcc # the cc-wrapper rustc needs to link
           elementsd-simplicity
         ];
 
         # The e2e tier (styx-node tests) reads this to find the Simplicity-capable node.
         ELEMENTSD_EXE = "${elementsd-simplicity}/bin/elementsd";
+
+        # cargo-llvm-cov normally fetches the rustup llvm-tools component; point it at the
+        # llvm-cov/llvm-profdata from the same LLVM this rustc was built with instead.
+        LLVM_COV = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-cov";
+        LLVM_PROFDATA = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-profdata";
 
         shellHook = ''
           echo "styx v1 dev shell"
@@ -39,6 +46,8 @@
           echo ""
           echo "  fast tiers : cargo test --workspace          # unit + prune-level, no node"
           echo "  e2e        : cargo test -p styx-node -- --ignored"
+          echo "  format     : cargo fmt --all [--check]"
+          echo "  coverage   : cargo llvm-cov --workspace [--html]"
         '';
       };
     };

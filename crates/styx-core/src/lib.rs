@@ -30,8 +30,10 @@ pub fn secp() -> &'static elements::secp256k1_zkp::Secp256k1<elements::secp256k1
 pub mod artifacts;
 pub mod consts;
 pub mod domain;
+pub mod encode;
 pub mod leaves;
 pub mod math;
+pub mod oracle;
 pub mod params;
 pub mod units;
 

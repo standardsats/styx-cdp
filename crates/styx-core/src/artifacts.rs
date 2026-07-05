@@ -89,6 +89,13 @@ pub fn compile(cov: Covenant, args: Arguments) -> Result<CompiledProgram, Compil
     })
 }
 
+/// Parse a frozen covenant without instantiating params. Exposes what `CompiledProgram` does
+/// not: the declared witness types, which the encoder conformance tests compare against.
+pub fn template(cov: Covenant) -> Result<simplicityhl::TemplateProgram, CompileError> {
+    simplicityhl::TemplateProgram::new(cov.source(), Box::new(ElementsJetHinter::new()))
+        .map_err(|message| CompileError { covenant: cov.name(), message })
+}
+
 /// The covenant's CMR as the taproot leaf script: in Elements' Simplicity leaf encoding the
 /// leaf script is the raw 32 CMR bytes.
 pub fn cmr_script(prog: &CompiledProgram) -> elements::Script {

@@ -14,12 +14,19 @@ use simplicityhl::elements::secp256k1_zkp as zkp;
 
 use crate::units::{BlockHeight, Price, RatioK};
 
+/// Heights at or above this are BIP65 timestamps, not block heights. The covenants assert
+/// `height < 500000000` inside `verify_quorum` (issuer.simf:181 and the vault's twin), so the
+/// mint floor can never be advanced past a reachable block.
+pub const LOCK_TIME_HEIGHT_THRESHOLD: u32 = 500_000_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum OracleError {
     #[error("oracle slot {0} out of range (0..=4)")]
     InvalidSlot(u8),
     #[error("duplicate oracle slot {0}")]
     DuplicateSlot(u8),
+    #[error("tick height {0} is at or above the BIP65 lock-time threshold")]
+    HeightAboveThreshold(u32),
 }
 
 /// What a tick commits to.
@@ -79,6 +86,9 @@ impl OracleTick {
         backing_k: RatioK,
         quotes: [(OracleSlot, SignedQuote); 3],
     ) -> Result<Self, OracleError> {
+        if height.raw() >= LOCK_TIME_HEIGHT_THRESHOLD {
+            return Err(OracleError::HeightAboveThreshold(height.raw()));
+        }
         let mut slots = [None; 5];
         for (slot, quote) in quotes {
             if slots[slot.index()].is_some() {
@@ -97,6 +107,18 @@ impl OracleTick {
     }
     pub fn slots(&self) -> &[Option<SignedQuote>; 5] {
         &self.slots
+    }
+
+    /// (min, max) over the three active quotes - the covenant's directional quorum: mint
+    /// gates price at the min, liquidation and redemption at the max.
+    pub fn price_range(&self) -> (Price, Price) {
+        let mut lo = Price::new(u32::MAX);
+        let mut hi = Price::new(0);
+        for q in self.slots.iter().flatten() {
+            lo = lo.min(q.price);
+            hi = hi.max(q.price);
+        }
+        (lo, hi)
     }
 }
 
@@ -135,6 +157,23 @@ mod tests {
     fn slot_range_is_checked() {
         assert_eq!(OracleSlot::new(5).map(|_| ()), Err(OracleError::InvalidSlot(5)));
         assert!(OracleSlot::new(4).is_ok());
+    }
+
+    #[test]
+    fn tick_height_below_the_bip65_threshold() {
+        let quotes = || {
+            [
+                (OracleSlot::new(0).unwrap(), quote()),
+                (OracleSlot::new(1).unwrap(), quote()),
+                (OracleSlot::new(2).unwrap(), quote()),
+            ]
+        };
+        let k = RatioK::from_cr_percent(100);
+        assert!(OracleTick::new(BlockHeight::new(LOCK_TIME_HEIGHT_THRESHOLD - 1), k, quotes()).is_ok());
+        assert_eq!(
+            OracleTick::new(BlockHeight::new(LOCK_TIME_HEIGHT_THRESHOLD), k, quotes()).map(|_| ()),
+            Err(OracleError::HeightAboveThreshold(LOCK_TIME_HEIGHT_THRESHOLD))
+        );
     }
 
     #[test]

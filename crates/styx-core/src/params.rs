@@ -70,7 +70,7 @@ pub(crate) fn asset_u256(id: AssetId) -> U256 {
     U256::from_byte_array(bytes.try_into().unwrap())
 }
 
-/// An x-only key as the u256 covenant param.
-pub(crate) fn xonly_u256(pk: &XOnlyPublicKey) -> U256 {
+/// An x-only key as the u256 the covenants commit to (owner fields, oracle params).
+pub fn xonly_u256(pk: &XOnlyPublicKey) -> U256 {
     U256::from_byte_array(pk.serialize())
 }

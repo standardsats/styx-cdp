@@ -17,9 +17,11 @@ green. Statuses: [ ] planned, [x] done.
 - [x] **M3 - witness encoders (type conformance).** `ToSimf` layer, the three op enums and their
   total lowerings; the OP sum types equal the covenant-declared witness types, and every
   variant satisfies its covenant.
-- [ ] **M4 - prune harness + POKE + OPEN.** Testkit (deploy fixture, chain-state factory,
-  tamper, accept/reject asserts); the smallest op proves the build -> sign -> finalize pipeline
-  end to end; OPEN ports the borrow-fee probes.
+- [x] **M4 - prune harness + POKE + OPEN.** styx-pset: intents, TxPlan + witness slots,
+  finalize via `satisfy_with_env` (the node's verdict, off node), testkit (test deploy,
+  synthetic chain state, tamper, per-slot verdicts); POKE proves the pipeline end to end,
+  OPEN ports the borrow-fee probes (E-2). Builders refuse bad intents with typed errors;
+  `*_unchecked` variants let negative tests make the covenant the judge.
 - [ ] **M5 - arm-discrimination matrix.** 8x8 vault, 4x4 issuer, 2x2 stability: encoding of op i
   against the canonical env of op j accepts iff i == j; golden pruned program bytes per variant.
 - [ ] **M6 - owner ops.** REPAY / CLOSE / DRAW / REFRESH builders with their negatives

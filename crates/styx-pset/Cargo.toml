@@ -1,0 +1,10 @@
+[package]
+name = "styx-pset"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 transaction builders: pure (state + intent) -> plan, sign, finalize"
+
+[dependencies]
+styx-core = { path = "../styx-core" }
+thiserror = { workspace = true }

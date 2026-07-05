@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment and freeze - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Θʹ</span> · genesis and the freeze</div>
+  <h1>Deployment and freeze</h1>
+  <p class="lede">STYX ships as immutable artifacts. Deployment is therefore a one-shot,
+  genesis-time act: compile the five covenants, pin them into each other, issue the two assets,
+  and verify everything <b>before</b> the first satoshi is locked - because nothing can be fixed
+  after.</p>
+</header>
+
+<h2 id="compile"><span class="sec">1</span>Compilation and pinning</h2>
+
+<p>The covenants compile in dependency order - <b>pot, stability, vault, issuer</b> - and each
+later artifact receives the earlier ones' identities as compile-time parameters:</p>
+
+<ol>
+  <li>The pot's two leaves compile against the OBOL and token asset ids; its taproot scriptHash
+  becomes <code>POT_SPK</code>.</li>
+  <li>The reserve compiles against <code>POT_SPK</code> and the asset ids; its scriptHash
+  becomes <code>STABILITY_SPK</code>.</li>
+  <li>The vault compiles against both flat pins plus the NUMS, the tapleaf constants, and the
+  five oracle keys; its commitment Merkle root becomes <code>VAULT_CMR</code>.</li>
+  <li>The issuer compiles against everything, including <code>VAULT_CMR</code> - it is the only
+  artifact that carries another covenant's CMR.</li>
+</ol>
+
+<p>The two assets are issued with no reissuance token: 100,000,000 OBOL into the pot and one
+identity token unit into the issuer. Neither can ever be reissued.</p>
+
+<h2 id="preflight"><span class="sec">2</span>The deploy preflight</h2>
+
+<p>The genesis configuration is baked into immutable artifacts, so its correctness is a trust
+assumption - the preflight turns as much of it as possible into asserted fact:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Check</th><th>Why it is load-bearing</th></tr>
+  <tr><td>the five oracle x-only keys are pairwise distinct</td>
+      <td>a duplicated key silently degrades 2-Byzantine tolerance to 1 - the quorum still
+      verifies, the math is just wrong</td></tr>
+  <tr><td>NUMS equals the canonical BIP341 point
+      <code>50929b74...803ac0</code></td>
+      <td>a "NUMS" with a known discrete log makes every covenant key-path spendable</td></tr>
+  <tr><td><code>OBOL_ID != ISSUER_TOKEN_ID</code></td>
+      <td>the token gate and the debt asset must never alias</td></tr>
+  <tr><td><code>POT_SPK</code>, <code>STABILITY_SPK</code>, <code>VAULT_CMR</code> each equal
+      the actually compiled sibling</td>
+      <td>a pin pointing at anything else redirects value flows at genesis, invisibly and
+      forever</td></tr>
+</table></div>
+
+<div class="caution"><span class="lbl">On a real deploy</span>
+<p>The reference preflight compares pins against a same-process recompilation. A production
+multi-artifact deployment must compare them against the <b>published on-chain</b> scriptHashes
+and CMRs - the artifacts users will actually spend against - not against a local recompute that
+could differ from what was shipped.</p></div>
+
+<h2 id="freeze"><span class="sec">3</span>The freeze and the golden CMRs</h2>
+
+<p>The v1 covenant source is frozen (2026-07-03), after the economic pass and the final
+hardening round. The gate is the golden-CMR test: each covenant is compiled against a fixed set
+of dummy parameters so its CMR isolates the source logic; comments and witness values do not
+affect it, and any behavioral change flips it and fails the gate. The frozen roots:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Covenant</th><th>Frozen CMR</th></tr>
+  <tr><td>reserve_repay</td><td><code>52828127db4184834512b2e486e23c308f037e68deab8506fdcbb96e4b9e303f</code></td></tr>
+  <tr><td>pot_outflow</td><td><code>d1e8412dcf1fedaec9879e9afcaa1d2b11046178268b601d17c324716b47c5c6</code></td></tr>
+  <tr><td>stability</td><td><code>3ce24252af1248a0a6992868c324c8e928c55c4d043d85bf1cc4bbd8a1c65fd4</code></td></tr>
+  <tr><td>vault</td><td><code>8ea44eac4c31403a0e35b75940225d5f8833114ae2a9ac8d9607be25ec291eb7</code></td></tr>
+  <tr><td>issuer</td><td><code>145438e32272e966a1015593924210e7cc3951155ee2d904c81dee850a3b38f3</code></td></tr>
+</table></div>
+
+<p>If these values ever change, the covenant was re-frozen and this specification needs a
+version bump - the CMRs are the spec's integrity check as much as the code's.</p>
+
+<h2 id="ops"><span class="sec">4</span>Operational invariants</h2>
+
+<p>Three things the covenant assumes but cannot enforce, owed by whoever operates the
+deployment:</p>
+
+<ul>
+  <li><b>Exactly one pot UTXO and one reserve UTXO.</b> Both addresses are public; anyone can
+  create a second UTXO there. The covenants cannot consolidate fragments, so value sent to a
+  fragment is operationally stranded until deliberately spent back in one piece. Builders must
+  refuse to act when they observe more than one.</li>
+  <li><b>Keepers run on a schedule.</b> POKE the issuer anchor toward the tip and REFRESH
+  dormant healthy vaults - the ratchets only protect positions someone keeps fresh.</li>
+  <li><b>Oracle prices come from tight, aggregated feeds.</b> The keeper's quote-subset freedom
+  means the oracle spread is directly the owner-protection slack
+  (<a href="oracle.html#directional">chapter Εʹ</a>).</li>
+</ul>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

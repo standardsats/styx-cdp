@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary and appendix - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">ΙΑʹ</span> · appendix</div>
+  <h1>Glossary and appendix</h1>
+  <p class="lede">Terms of art, the Elements and Simplicity primitives the design leans on, and
+  how to compile and verify the frozen covenants yourself.</p>
+</header>
+
+<h2 id="glossary"><span class="sec">1</span>Glossary</h2>
+
+<dl class="gloss">
+  <dt>OBOL</dt>
+  <dd>The USD-pegged debt token. A native Liquid issued asset with a fixed, non-reissuable
+  supply of 100,000,000. Named for the coin paid to the ferryman.</dd>
+  <dt>POLICY / L-BTC</dt>
+  <dd>Liquid bitcoin, the network's policy asset. The collateral and the fee asset.</dd>
+  <dt>vault</dt>
+  <dd>A per-position covenant UTXO holding L-BTC, with <code>(debt, owner, last_height)</code>
+  committed in its address.</dd>
+  <dt>pot</dt>
+  <dd>The single constant-address UTXO holding the entire OBOL supply. Outstanding OBOL is by
+  definition <code>100,000,000 - pot balance</code>.</dd>
+  <dt>issuer / identity token</dt>
+  <dd>The singleton covenant holding the unique one-unit token that authorizes every mint and
+  every bad-debt attestation.</dd>
+  <dt>stability reserve</dt>
+  <dd>The single constant-address L-BTC UTXO that backstops bad debt, funded by protocol
+  fees.</dd>
+  <dt>CR - collateral ratio</dt>
+  <dd><code>collateral value / debt value</code>, computed in the k-encoding
+  <code>k = CR_percent * 2,000,000</code>. Debt is denominated in cents.</dd>
+  <dt>tick</dt>
+  <dd>One oracle observation: <code>(height, price, backing_k)</code>, BIP-340 signed by exactly
+  three of the five oracle keys.</dd>
+  <dt>backing_k</dt>
+  <dd>The global backing ratio (aggregate collateral value over outstanding OBOL at par),
+  co-signed inside every tick, read only by the REDEEM floor.</dd>
+  <dt>last_height</dt>
+  <dd>The per-vault freshness ratchet: the height of the newest tick the vault has acknowledged.
+  Removal operations require a strictly newer tick.</dd>
+  <dt>last_mint_height</dt>
+  <dd>The global mint anchor in the issuer's data leaf. Mints require a tick at least this
+  fresh (non-strict, so equal-height mints do not serialize).</dd>
+  <dt>ratchet</dt>
+  <dd>Any stored height that can only move forward, and only to a quorum-verified value. The
+  protocol's substitute for reading a clock.</dd>
+  <dt>quorum</dt>
+  <dd>The exactly-3-of-5 signature check over a tick, returning the (MIN, MAX) of the three
+  prices.</dd>
+  <dt>keeper</dt>
+  <dd>Any party running the permissionless operations: liquidations, bad-debt clears, POKE,
+  REFRESH. No registration, no whitelist. A keeper run purely to watch for and perform the
+  liveness duties (POKE, REFRESH) is a <b>watchtower</b>.</dd>
+  <dt>redeemer</dt>
+  <dd>Any OBOL holder swapping OBOL for collateral at the peg floor via REDEEM.</dd>
+  <dt>CMR - commitment Merkle root</dt>
+  <dd>The root hash identifying a Simplicity program; the covenant analog of a script hash.
+  Taproot leaves commit to it, and witness data does not change it.</dd>
+  <dt>data leaf</dt>
+  <dd>An unspendable taproot leaf (version 0xc4, starting with <code>OP_RETURN</code>) carrying
+  protocol state next to the covenant leaf in the same tree.</dd>
+  <dt>NUMS</dt>
+  <dd>The canonical BIP341 nothing-up-my-sleeve point used as every covenant's taproot internal
+  key, making the key path unspendable.</dd>
+  <dt>dd</dt>
+  <dd>The debt delta repaid in a partial liquidation.</dd>
+  <dt>golden CMR</dt>
+  <dd>A frozen CMR value recorded in the test gate; any behavioral change to a covenant flips
+  it.</dd>
+</dl>
+
+<h2 id="primitives"><span class="sec">2</span>Elements and Simplicity primitives</h2>
+
+<p>The design leans on a small set of platform facts; several of them shaped the architecture
+directly.</p>
+
+<ul>
+  <li><b>Explicit values, fail-closed.</b> Covenant reads use
+  <code>unwrap_right(amount)</code>: an explicit amount is the Right branch, a blinded one is
+  Left and the unwrap fails. Protocol outputs are therefore unblinded by construction, and a
+  blinded decoy cannot satisfy a covenant read. Privacy of protocol amounts is deliberately
+  given up.</li>
+  <li><b>Non-reissuable issuance.</b> Issuing with no token amount creates no reissuance token
+  at all - fixed supply is a property of the asset, not a promise.</li>
+  <li><b>u64 ratio math.</b> There is no 128-bit compare or split jet, so all ratio checks are
+  reformulated as required-collateral comparisons via
+  <code>coll_at_cr(debt_cents, price, k) = divide_64(debt_cents * k, price * 200)</code>,
+  keeping every intermediate in u64. <code>divide_64</code> truncates; every band and cap is
+  arranged so truncation favors the protocol. Debt is asserted below 2^32 cents wherever it is
+  priced.</li>
+  <li><b>Pruning and the anti-DOS rule.</b> A covenant with a <code>match</code> must be pruned
+  against the spending environment before encoding; untaken branches become hidden nodes, the
+  CMR is preserved, and the pruned program fits the natural per-input budget - all STYX
+  branches run at roughly 1,100 to 1,800 WU (1.1 to 1.8M milliWU) against a 4,000,050 WU
+  consensus ceiling, well under a tenth of a percent of it, and every transaction relays as
+  standard, with no annex.</li>
+  <li><b>Taproot under NUMS.</b> The covenants rebuild tapleaf, tapbranch, and taptweak hashes
+  bit-for-bit in Simplicity (tag <code>sha256("TapLeaf/elements")</code>, data-leaf version
+  <code>0xc4</code>), which is what makes address reconstruction - and therefore
+  state-in-address - possible at all.</li>
+  <li><b>check_lock_height is a lower bound only.</b> It proves a tick's height was reached,
+  never that it is recent - the root reason every freshness property in STYX is a ratchet. Its
+  jet semantics also make far-future heights unsatisfiable
+  (<a href="oracle.html#lockheight">chapter Εʹ</a>).</li>
+</ul>
+
+<h3>Gotchas recorded in the build log</h3>
+<ul class="fine">
+  <li><code>jet::sig_all_hash()</code> commits to all inputs' annexes - attach any annex before
+  signing (moot after pruning: no annex is needed).</li>
+  <li>A SimplicityHL witness value can be read once; bind it to a <code>let</code> to reuse.</li>
+  <li>Every declared witness needs a value even on a pruned branch - the "missing witness" trap
+  that killed a two-tick redemption design.</li>
+  <li><code>BitMachine::exec</code> does not enforce the anti-DOS case check: a local preflight
+  can pass while the node rejects. <code>satisfy_with_env</code> gives the node's verdict.</li>
+  <li>An issuance attached to an unsigned input is rejected; hop genesis funds through a signed
+  wallet coin first.</li>
+  <li>SimplicityHL has no includes - each program duplicates its helpers, which is why the five
+  files share ~200 lines of identical hashing and quorum code.</li>
+</ul>
+
+<h2 id="toolchain"><span class="sec">3</span>Compiling and verifying the covenants</h2>
+
+<p>The frozen CMRs are only meaningful under a pinned toolchain - same source, same compiler,
+same roots. The v1 pins:</p>
+
+<ul>
+  <li><b>SimplicityHL</b> at git rev <code>63cd0924c44fc2fa0d774ef5083a3123865fb4d0</code>
+  (v0.6.0-rc.0 line), consumed as a pinned cargo git dependency; covenants compile in-process,
+  no separate <code>simc</code> binary needed.</li>
+  <li><b>elementsd with Simplicity</b>: built from the ElementsProject
+  <code>simplicity</code> branch, rev <code>f957d3cd...</code>, label
+  <code>liquid-testnet-2024-10-08</code>.</li>
+</ul>
+
+<p>To verify the covenants against this spec: compile the five <code>.simf</code> files with the
+pinned SimplicityHL rev (against fixed dummy parameters, as the golden-CMR gate does) and
+compare the resulting CMRs to the table in <a href="deployment.html#freeze">chapter Θʹ</a>. To
+verify behavior, run the lifecycle against a regtest elementsd started with Simplicity active
+from genesis (<code>-evbparams=simplicity:-1:::</code>) - every accept and reject in this spec
+is reproducible as a node verdict. Reproducible compilation is what makes the golden-CMR gate
+and the deploy preflight meaningful; keep the pins.</p>
+
+<h2 id="history"><span class="sec">4</span>Provenance</h2>
+
+<p>The design grew through four on-node stages, each one proven against a real Simplicity node
+before the next was attempted: a single vault (covenant-enforced open, borrow, and oracle-priced
+liquidation), many vaults on one shared pot (per-vault debt committed in the address),
+owner-signed operations, and finally the complete v1 - the fee model, the liquidation ladder,
+the reserve, and redemptions. Every design decision along the way was recorded with its
+rationale and its rejected alternatives; this specification is the synthesis of that record,
+and for v1 it is the source of truth. The frozen covenant source, pinned by the golden CMRs,
+is the artifact it describes.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

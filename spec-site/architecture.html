@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Βʹ</span> · the UTXO model</div>
+  <h1>Architecture</h1>
+  <p class="lede">STYX has no database, no contract storage, and no global state machine. State
+  lives in taproot <b>addresses</b>; authority lives in a <b>one-unit token</b>; and the covenants
+  recognize each other through a dependency graph that is deliberately a DAG.</p>
+</header>
+
+<h2 id="state"><span class="sec">1</span>State lives in the address</h2>
+
+<p>A vault is a taproot UTXO whose address commits both the covenant and the position's state:</p>
+
+<pre><code>vault address = taproot(
+    <span class="k">internal key</span> = NUMS,                    <span class="c">// unspendable point</span>
+    tapbranch(
+        leaf( <span class="k">VAULT_CMR</span> ),                    <span class="c">// the covenant program</span>
+        leaf_0xc4( <span class="k">OP_RETURN</span> || debt(8 BE) || owner(32) || last_height(4 BE) )
+    )                                        <span class="c">// 45-byte data leaf</span>
+)</code></pre>
+
+<p>The second leaf is pure data: 45 bytes beginning with <code>OP_RETURN</code>, so it is
+unspendable, and the covenant leaf is the only spend path
+<a class="src" href="source.html#vault-L8">vault.simf:8</a>. The covenant reconstructs its own scriptPubKey from the
+witnessed state (<code>jet::script_cmr</code>, <code>jet::internal_key</code>, and a hand-hashed
+data leaf) and asserts it equals <code>jet::current_script_hash()</code>
+<a class="src" href="source.html#vault-L244">vault.simf:244</a>. A wrong witnessed debt produces a different address, so
+witnessed state is bound to committed state: the state is <b>self-authenticating</b>. The issuer
+uses the same trick with a 5-byte leaf, <code>OP_RETURN || last_mint_height(4 BE)</code>
+<a class="src" href="source.html#issuer-L14">issuer.simf:14-15</a>.</p>
+
+<div class="why"><span class="lbl">Why state-in-address</span>
+<p>With one shared pot and many vaults, each vault must carry its own debt. Committing it in the
+address lets a counterparty covenant check that a newly opened vault sits at exactly the address
+encoding that debt - otherwise OBOL could be minted against a vault the protocol could not later
+liquidate. A separate "state UTXO" was rejected because it creates a commitment cycle: the vault
+would commit the state covenant's CMR while the state covenant commits the vault's, and neither
+can be compiled first.</p></div>
+
+<p>State changes are expressed as <b>recursion</b>: the covenant requires output 0 to be a vault
+address reconstructed with the new state (<code>recurse_to</code>,
+<a class="src" href="source.html#vault-L195">vault.simf:195-198</a>). Debt is static between events; there is nothing to
+update lazily and no interest to accrue, which is what makes the address model workable.</p>
+
+<h2 id="nums"><span class="sec">2</span>No key path exists</h2>
+
+<p>Every covenant UTXO uses the canonical BIP341 nothing-up-my-sleeve point as its taproot
+internal key:</p>
+
+<pre><code>NUMS = <span class="n">50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0</span></code></pre>
+
+<p>No one knows a discrete log for this point, so the key-path spend is impossible and the
+script path - the covenant - is the only way to move the UTXO. The deploy preflight asserts the
+NUMS is exactly this constant (<a href="deployment.html#preflight">chapter Θʹ</a>), because a
+"NUMS" with a known discrete log would let its holder bypass every covenant in the system. The audits treat
+"no key path" as load-bearing: a future key-path leaf that let the issuer token escape would
+silently unlock the entire pot.</p>
+
+<h2 id="dag"><span class="sec">3</span>The dependency DAG</h2>
+
+<p>Covenants must recognize each other: the vault pays fees into the reserve, the reserve reads
+the pot, the issuer builds vaults. Each recognition is a compile-time dependency - to pin a
+sibling you need its identity, and the identity of a covenant is only known after it compiles.
+Mutual CMR reconstruction is therefore impossible (each CMR would need the other first), and the
+whole graph must be a DAG:</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 310" role="img" aria-label="Covenant dependency DAG">
+  <defs>
+    <marker id="m-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#97814e"/></marker>
+    <marker id="m-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7fa3bc"/></marker>
+  </defs>
+  <!-- edges -->
+  <path class="edge gold" d="M186,132 C 230,110 240,90 276,74" marker-end="url(#m-g)"/>
+  <text class="elbl" x="100" y="92" fill="#c8a45c">VAULT_CMR · reconstructs</text>
+  <path class="edge blue" d="M186,168 C 230,190 240,210 276,226" marker-end="url(#m-b)"/>
+  <text class="elbl" x="168" y="215">STABILITY_SPK</text>
+  <path class="edge blue" d="M186,150 C 340,150 420,150 534,150" marker-end="url(#m-b)"/>
+  <text class="elbl" x="228" y="143">POT_SPK</text>
+  <path class="edge blue" d="M446,74 C 490,90 500,110 536,132" marker-end="url(#m-b)"/>
+  <text class="elbl" x="472" y="92">POT_SPK</text>
+  <path class="edge blue" d="M446,226 C 490,210 500,190 536,168" marker-end="url(#m-b)"/>
+  <text class="elbl" x="472" y="215">POT_SPK</text>
+  <path class="edge blue" d="M361,86 L361,208" marker-end="url(#m-b)"/>
+  <text class="elbl" x="368" y="112">STABILITY_SPK</text>
+  <!-- nodes -->
+  <g><rect class="box" x="26" y="112" width="160" height="76" rx="9"/>
+     <text class="dt" x="46" y="142">Issuer</text>
+     <text class="dm" x="46" y="162">compiled last</text></g>
+  <g><rect class="box" x="286" y="26" width="160" height="60" rx="9"/>
+     <text class="dt" x="306" y="52">Vault</text>
+     <text class="dm" x="306" y="72">compiled third</text></g>
+  <g><rect class="box" x="286" y="214" width="160" height="60" rx="9"/>
+     <text class="dt" x="306" y="240">Stability</text>
+     <text class="dm" x="306" y="260">compiled second</text></g>
+  <g><rect class="box" x="536" y="112" width="160" height="76" rx="9"/>
+     <text class="dt" x="556" y="140">Pot</text>
+     <text class="dm" x="556" y="160">compiled first,</text>
+     <text class="dm" x="556" y="176">the root</text></g>
+</svg>
+<figcaption>The dependency DAG. A gold edge is a full CMR reconstruction (the issuer rebuilds
+vault addresses inside Simplicity). Blue edges are flat scriptHash pins. Compile order:
+POT, STABILITY, VAULT, ISSUER.</figcaption>
+</figure>
+
+<p>The graph is <code>{ISSUER -&gt; {VAULT, POT, STABILITY}, VAULT -&gt; {POT, STABILITY},
+STABILITY -&gt; POT}</code>. Two devices keep it acyclic:</p>
+
+<ul>
+  <li><b>Flat identities.</b> Where two covenants must check each other, one direction uses a
+  non-CMR identity. The pot and the reserve are <b>constant addresses</b> - single UTXOs whose
+  scriptHash never changes - so anyone can pin them by the flat parameters <code>POT_SPK</code>
+  and <code>STABILITY_SPK</code> without a compile dependency cycle. The issuer is recognized in
+  the other direction by its <b>token asset id</b>, <code>ISSUER_TOKEN_ID</code>, a genesis fact
+  that needs no compilation at all (this is how the pot's outflow leaf and the reserve's bad-debt
+  arm gate on the issuer).</li>
+  <li><b>One reconstructor.</b> Only the issuer rebuilds vault addresses (the single gold edge).
+  Vaults are parameterized by their data leaf, so they have no flat handle; whoever must verify
+  "this is a genuine vault" must reconstruct it, and that ability is deliberately concentrated
+  in one covenant.</li>
+</ul>
+
+<h2 id="singleton"><span class="sec">4</span>The issuer singleton</h2>
+
+<p>Mint authority is a physical object: a unique one-unit token, issued at genesis with no
+reissuance token, held only by the issuer covenant. Every arm of the issuer ends by passing the
+token to its own successor address, pinning <code>asset == ISSUER_TOKEN_ID</code> and
+<code>amount == 1</code> (<code>recurse_token</code>,
+<a class="src" href="source.html#issuer-L215">issuer.simf:215-222</a>). The consequences:</p>
+
+<ul>
+  <li>The token can never leave the covenant, never split, and never be duplicated - single-unit
+  uniqueness is a covenant invariant, not a convention.</li>
+  <li>The pot releases OBOL only when this token is co-spent at the input adjacent to it
+  <a class="src" href="source.html#pot_outflow-L37">pot_outflow.simf:37-39</a>, so every mint is authorized by a genuine,
+  health-checked issuer arm.</li>
+  <li>At most one issuer-authorized operation exists per transaction: mints and bad-debt
+  attestations <b>serialize</b> through this one UTXO. This is an accepted throughput trade -
+  the mint path is the only one that needs the issuer; liquidations, redemptions, and repayments
+  bypass it, sharing the pot (and, where fees flow, the reserve) chains instead, and REFRESH
+  touches no singleton at all.</li>
+</ul>
+
+<div class="caution"><span class="lbl">Design history</span>
+<p>An earlier cut used OBOL's own reissuance token as the authority object. That was a critical
+hole: a reissuance token is minting power, and whoever spent the issuer could have reissued
+unlimited OBOL. The identity token is a separate asset precisely so that no reissuance right
+exists anywhere.</p></div>
+
+<h2 id="delegated"><span class="sec">5</span>The delegated-amount rule</h2>
+
+<p>The one covenant-break class that survived early review, and the design rule that closed it,
+deserve their own section, because every guard pattern in the frozen source follows from it.</p>
+
+<p>The failure shape: a covenant authorizes a value movement by reconstructing a successor
+<b>address</b> (or by gating on token presence) while delegating the <b>amount</b> to a sibling
+branch it assumes is co-running. If an attacker can substitute which branch of that sibling
+actually runs - a REFRESH standing in for a DRAW, a zero-amount DRAW standing in for an ATTEST, a
+decoy UTXO standing at the expected index - the value moves with no arm ever pinning it. The
+fresh-context audit round traced four critical findings to this single root cause.</p>
+
+<div class="why"><span class="lbl">The rule</span>
+<p>Pin the amount where you authorize the movement; never delegate it to a branch that can be
+swapped. Where delegation is unavoidable, force the delegate: gate on the token, pin
+<code>current_index</code>, read the co-spent sibling at a relative index
+(<code>current_index - 1</code>), and back it with an independent structural invariant (for
+example: "the pot strictly grows" is only true of ATTEST, so requiring strict growth forces
+ATTEST regardless of index games).</p></div>
+
+<p>You will see the resulting idiom throughout <a href="covenants.html">chapter Γʹ</a>: every
+value-carrying read pins <b>script and asset and amount</b>, both ends of a pot move are pinned
+to <code>POT_SPK</code>, every covenant pins its own <code>current_index</code>, and
+zero-amount operations are rejected (<code>principal &gt; 0</code>, <code>d &gt; 0</code>) so no
+arm can run "for free" just to satisfy someone else's gate.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

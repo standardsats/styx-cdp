@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Economic model - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Ζʹ</span> · mechanism design</div>
+  <h1>Economic model</h1>
+  <p class="lede">Every economic parameter in STYX is a covenant constant - there is no
+  governance dial to turn later. This chapter is the canonical parameter table, the keeper
+  incentive map, the peg mechanism, and the record of the economic audit that shaped them.</p>
+</header>
+
+<h2 id="params"><span class="sec">1</span>The parameter table</h2>
+
+<p>Ratios are encoded as <code>k = CR_percent * 2,000,000</code>; the k column is the literal
+that appears in the source (<a href="covenants.html#vault">why this encoding</a> - it keeps all
+ratio math in u64). Debt is denominated in cents; the OBOL supply is fixed at 100,000,000.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Parameter</th><th>Value</th><th>k literal</th><th>Source</th></tr>
+  <tr><td>min CR to open / draw (MIN quote)</td><td class="num">150%</td><td class="num">300000000</td>
+      <td><a class="src" href="source.html#issuer-L186">issuer.simf:186-190</a>, <a class="src" href="source.html#vault-L305">vault.simf:305</a></td></tr>
+  <tr><td>liquidation trigger (MAX quote)</td><td class="num">CR &lt; 130%</td><td class="num">260000000</td>
+      <td><a class="src" href="source.html#vault-L332">vault.simf:332</a></td></tr>
+  <tr><td>partial heal band</td><td class="num">[132%, 137%]</td><td class="num">264000000 / 274000000</td>
+      <td><a class="src" href="source.html#vault-L346">vault.simf:346-347</a></td></tr>
+  <tr><td>keeper extraction cap (partial)</td><td class="num">1.15 x dd</td><td class="num">230000000</td>
+      <td><a class="src" href="source.html#vault-L353">vault.simf:353</a></td></tr>
+  <tr><td>partial penalty split</td><td class="num">10% keeper / 5% reserve</td><td class="num">10000000 (reserve)</td>
+      <td><a class="src" href="source.html#vault-L357">vault.simf:357</a></td></tr>
+  <tr><td>full-liq band (MAX quote)</td><td class="num">[100%, 115%]</td><td class="num">200000000 / 230000000</td>
+      <td><a class="src" href="source.html#vault-L377">vault.simf:377-379</a></td></tr>
+  <tr><td>full-liq reserve share</td><td class="num">excess / 3</td><td class="num">-</td>
+      <td><a class="src" href="source.html#vault-L389">vault.simf:389-391</a></td></tr>
+  <tr><td>bad-debt threshold (MAX quote)</td><td class="num">CR &lt; 100%</td><td class="num">200000000</td>
+      <td><a class="src" href="source.html#vault-L402">vault.simf:402</a></td></tr>
+  <tr><td>bad-debt keeper bounty</td><td class="num">5% of debt</td><td class="num">10000000</td>
+      <td><a class="src" href="source.html#issuer-L451">issuer.simf:451</a></td></tr>
+  <tr><td>bad-debt reserve cap per vault</td><td class="num">20% of debt</td><td class="num">40000000</td>
+      <td><a class="src" href="source.html#issuer-L471">issuer.simf:471</a></td></tr>
+  <tr><td>borrow fee (L-BTC, at OPEN)</td><td class="num">0.5%</td><td class="num">1000000</td>
+      <td><a class="src" href="source.html#issuer-L257">issuer.simf:257</a></td></tr>
+  <tr><td>redemption fee</td><td class="num">0.5%</td><td class="num">1000000</td>
+      <td><a class="src" href="source.html#vault-L442">vault.simf:442</a></td></tr>
+  <tr><td>redemption floor</td><td class="num">min(par, backing_k)</td><td class="num">200000000 (par)</td>
+      <td><a class="src" href="source.html#vault-L438">vault.simf:438-439</a></td></tr>
+  <tr><td>interest</td><td class="num">none</td><td class="num">-</td><td>by design, see below</td></tr>
+</table></div>
+
+<h2 id="keepers"><span class="sec">2</span>The keeper P&amp;L map</h2>
+
+<p>Liquidation is permissionless, so the parameters must make honest keeping profitable at
+every rung and make dishonest keeping a loss. The map across the bands:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Band</th><th>Keeper action</th><th>Keeper profit</th><th>Reserve</th></tr>
+  <tr><td class="num">(115%, 130%]</td>
+      <td>repay dd, heal to [132%, 137%]</td>
+      <td>10% of dd (extraction capped at 1.15 x dd)</td>
+      <td>+5% of dd</td></tr>
+  <tr><td class="num">[100%, 115%]</td>
+      <td>repay full debt, seize collateral</td>
+      <td>two thirds of the excess above par - at most ~10% of debt</td>
+      <td>+ excess / 3</td></tr>
+  <tr><td class="num">[80%, 100%)</td>
+      <td>bad-debt clear</td>
+      <td>up to the 5% bounty, shrinking to zero at CR 80% where the 20% cap saturates</td>
+      <td>- reserve_pay (capped)</td></tr>
+  <tr><td class="num">below 80%</td>
+      <td>bad-debt clear once OBOL de-pegs</td>
+      <td>positive as soon as OBOL trades below the vault's backing ratio</td>
+      <td>- reserve_pay (capped)</td></tr>
+</table></div>
+
+<div class="why"><span class="lbl">Why the 2:1 full-liq split</span>
+<p>Continuity. At CR 115% a partial liquidation pays the keeper 10% of debt and the reserve 5%.
+A full liquidation at the same CR has an excess of exactly 15% of debt; splitting it 2:1 pays
+the keeper 10% and the reserve 5% - the same numbers. Without the split, crossing the 115%
+boundary handed the keeper a windfall jump and cut the reserve's funding to zero on precisely
+the band where liquidations become forced sales.</p></div>
+
+<div class="why"><span class="lbl">Why the heal band moved to [132%, 137%]</span>
+<p>The original heal target was [150%, 155%]. Healing only to just above the 130% trigger means
+the owner keeps more equity per liquidation event and the keeper fronts a smaller repayment -
+smaller per-step collateral dumps, less reflexivity in a falling market. The cost is accepted
+and documented: a healed vault has a thinner buffer, re-triggers sooner, and if a crash follows
+it lands deeper - the reserve sizing accounts for this. The 115% full-liq boundary is set by the
+1.15 extraction cap, not the heal target, so no dead zone reopens.</p></div>
+
+<h2 id="peg"><span class="sec">3</span>The peg</h2>
+
+<ul>
+  <li><b>Floor</b> (OBOL below $1): anyone buys cheap OBOL and redeems it for collateral at
+  <code>min(par, backing_k) - 0.5%</code>, at the MAX quote. While the system is backed, the
+  floor is roughly $0.995; when it is not, the floor is the honest backing ratio
+  (<a href="reserve.html#floor">chapter ΣΤʹ</a>).</li>
+  <li><b>Ceiling</b> (OBOL above $1): anyone locks L-BTC at 150% and mints at the MIN quote,
+  capping the price near $1 + 0.5% + cost of capital.</li>
+  <li><b>The calm band</b> is therefore about [$0.99, $1.02]. It breaks in exactly two ways:
+  deep insolvency (a soft, continuous de-peg to the backing ratio - by design) and an oracle
+  outage (both arbitrage paths are price-gated; mitigated by the 3-of-5 quorum).</li>
+</ul>
+
+<h2 id="interest"><span class="sec">4</span>Why interest-free</h2>
+
+<p>STYX is Liquity-class: revenue is event-based - the one-time borrow fee, the redemption fee,
+and the penalty shares - and debt is static between events. This is not only a product choice;
+it is what the architecture wants. Debt lives in the vault's address, so time-based interest
+would require a lazy recompute at every touch (compound accrual is not expressible at all - no
+loops, no floats), an oracle-priced skim, a schema change to the address, and an
+accrue-then-gate step in every debt-reading arm. The known cost of forgoing it is <a href="#E-7">finding E-7</a>:
+zero carrying cost writes the borrower a free tail-risk put - accepted for v1, with linear
+accrual on a co-signed height documented as the v2 option. On the same principle, no protocol
+or developer fee exists in the covenant: a covenant tax is forkable and dilutes the trustless
+story.</p>
+
+<h2 id="findings"><span class="sec">5</span>The economic audit, E-1 to E-9</h2>
+
+<p>The round-1 findings converged on one root: the reserve is the sole backstop, it filled only
+from liquidations, and there were bands and speeds where liquidations do not fire - so the
+reserve was empty exactly when needed. The resolutions:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>#</th><th>Finding</th><th>Resolution</th></tr>
+  <tr id="E-1"><td class="num">E-1</td><td>3-of-3 oracle: one offline oracle halts every price-gated op;
+      outage during a fall means unbacked OBOL</td>
+      <td><b>covenant</b>: 3-of-5 directional quorum, same verification cost</td></tr>
+  <tr id="E-2"><td class="num">E-2</td><td>reserve insolvency; the old arm hard-required
+      shortfall &lt;= balance (all-or-nothing cliff)</td>
+      <td><b>covenant</b>: borrow fee routed to the reserve + saturating partial drain; the
+      deep systemic gap is an accepted soft de-peg</td></tr>
+  <tr id="E-3"><td class="num">E-3</td><td>the [100%, 115%] dead zone: neither partial-liquidatable nor
+      bad-debt-eligible</td>
+      <td><b>covenant</b>: the FULL-LIQ tier, self-financed</td></tr>
+  <tr id="E-4"><td class="num">E-4</td><td>bad-debt paid zero bounty - break-even keepers will not
+      clear bad debt</td>
+      <td><b>covenant</b>: 5% bounty, bounded by the M-1 cap</td></tr>
+  <tr id="E-5"><td class="num">E-5</td><td>keeper payout is covenant-unpinned - a mempool observer can
+      copy the transaction and redirect it</td>
+      <td><b>builder</b>: the mandatory keeper funding input signed SIGHASH_ALL commits the
+      payout (<a href="building.html#invariants">chapter Ιʹ</a>)</td></tr>
+  <tr id="E-6"><td class="num">E-6</td><td>the peg is soft on both sides</td>
+      <td>derivative of E-1 / E-2 plus the backing floor; no independent lever</td></tr>
+  <tr id="E-7"><td class="num">E-7</td><td>interest-free writes a free tail-risk put</td>
+      <td><b>accepted</b> for v1; interest is the documented v2 option</td></tr>
+  <tr id="E-8"><td class="num">E-8</td><td>redemption can force-close a specific healthy vault</td>
+      <td><b>accepted</b>: it is equity-neutral and costs the redeemer ~0.5%; a CR gate on
+      redemption would degrade the peg floor</td></tr>
+  <tr id="E-9"><td class="num">E-9</td><td>POKE is an unfunded liveness duty; a quiet market widens the
+      stale-mint window</td>
+      <td><b>operational</b>: scheduled keeper duty</td></tr>
+</table></div>
+
+<p>Round 2, run pre-freeze as three parallel modeling passes against the current covenant,
+returned the freeze verdict: <b>no covenant change required</b>. Every remaining item partitions
+into parameter, builder, operational, or accepted-residual - and the two optional tweaks the
+architect elected (the full-liq reserve share and the lower heal band) were applied, re-validated
+on-node, and are part of the frozen source. The stressed end-state of the system is a smooth,
+honest, pro-rata soft de-peg rather than a bank run or a freeze.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

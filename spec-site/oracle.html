@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The oracle - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Εʹ</span> · price and time</div>
+  <h1>The oracle</h1>
+  <p class="lede">A covenant cannot see the market and cannot see the clock. The oracle design
+  answers both blindnesses with one object: a <b>tick</b> - a price, a height, and a backing
+  figure, co-signed by exactly three of five keys and anchored to a reached block.</p>
+</header>
+
+<h2 id="tick"><span class="sec">1</span>The tick</h2>
+
+<p>Each oracle signs BIP-340 over one 12-byte message:</p>
+
+<pre><code>msg = sha256( height(4 BE) || price(4 BE) || backing_k(4 BE) )</code></pre>
+
+<p><a class="src" href="source.html#vault-L73">vault.simf:73-80</a>, <a class="src" href="source.html#issuer-L134">issuer.simf:134-141</a>.
+The price is USD per BTC; <code>backing_k</code> is the global backing ratio in the same
+k-encoding as every other ratio (par = 200000000) and is read only by the REDEEM floor. Folding
+it into the one shared tick was a deliberate budget decision: a second quorum fold pushed the
+REDEEM program past its execution budget, while one extra hashed field costs nothing.</p>
+
+<h2 id="quorum"><span class="sec">2</span>Exactly three of five</h2>
+
+<p><code>verify_quorum</code> takes five witness slots, one per fixed key
+<code>ORACLE_PK_1..5</code>, of which exactly three must carry a
+<code>(price, signature)</code> pair - the count is asserted equal to 3, not at least 3
+<a class="src" href="source.html#vault-L110">vault.simf:110-128</a>. Each counted slot verifies its signature against
+its own slot's key (no key can fill two slots) and asserts <code>price &gt; 0</code>, because
+<code>divide_64(n, 0) = 0</code> would collapse the health gate to zero collateral - a free
+mint, found and closed in the fresh-context audit round
+<a class="src" href="source.html#vault-L81">vault.simf:81-84</a>.</p>
+
+<p>The fault model: with at most 2 Byzantine keys, any three distinct keys contain at least one
+honest signer; and any three online keys suffice, so the system tolerates two crashed oracles.
+The original 3-of-3 design was rejected as a liveness single point of failure (the first finding,
+<a href="economics.html#E-1">E-1</a>, of the <a href="economics.html#findings">economic
+review</a>): one offline oracle halted every price-gated operation, which during a falling
+market converts directly into unbacked OBOL. 3-of-5 costs the same three signature
+verifications.</p>
+
+<h2 id="directional"><span class="sec">3</span>Directional quantiles</h2>
+
+<p>The quorum returns both extremes of the three quotes, <code>(MIN, MAX)</code>, and each
+operation reads the one that makes it <b>harder</b> to abuse:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Quote</th><th>Used by</th><th>What a lying oracle cannot do</th></tr>
+  <tr><td class="num"><b>MIN</b></td>
+      <td>OPEN, DRAW - the health gates</td>
+      <td>a single high outlier cannot fake health: the gate prices collateral at the lowest
+      quote, so faking a mint requires a high <b>minimum</b>, that is, unanimity among the
+      chosen three</td></tr>
+  <tr><td class="num"><b>MAX</b></td>
+      <td>LIQUIDATE, FULL-LIQ, BAD-DEBT, REDEEM, REFRESH, ATTEST - the removal gates and their
+      duals</td>
+      <td>a single low outlier cannot force a cheap seizure: eligibility is judged at the
+      highest quote, so a false liquidation requires a low <b>maximum</b></td></tr>
+</table></div>
+
+<p>Two gates look inverted at first sight and are correct duals: REFRESH proves CR &gt;= 130% at
+MAX - it is the logical complement of LIQUIDATE at the same quantile, "refreshable exactly when
+not liquidatable" - and FULL-LIQ's upper band bound uses MAX for the same reason. A median was
+considered and rejected: it needs all participants' values, so it is not live with an oracle
+offline, and min / max already gives value-safety in both directions.</p>
+
+<div class="note"><span class="lbl">Nuance: the keeper picks the three</span>
+<p>The keeper chooses <b>which</b> three of the five available quotes to present. For a
+borderline vault this means the effective price can sit anywhere in the honest oracle spread -
+in practice a removal fires near the median of the spread, not the true maximum. No value is
+stolen beyond what the spread allows (the result is always bounded by an honest quote), but it
+is the reason oracle price sourcing must be tight and aggregated: the spread is the attack
+surface. This subset freedom is inseparable from the 3-of-5 liveness property.</p></div>
+
+<h2 id="freshness"><span class="sec">4</span>Freshness: two ratchets</h2>
+
+<p>A signed tick is valid forever by itself - the covenant cannot read the chain tip, and
+<code>check_lock_height</code> only proves the tick's height has been <b>reached</b>, not that
+it is recent. Every replay defense in STYX is therefore a <b>ratchet relative to stored
+state</b>:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Ratchet</th><th>Comparison</th><th>Guards</th><th>Advanced by</th></tr>
+  <tr><td>per-vault <code>last_height</code></td>
+      <td><b>strict</b> <code>lt_32</code></td>
+      <td>every collateral-removing op and DRAW: the tick must be strictly newer than the
+      vault's last acknowledged height, so a dip tick from the past cannot be replayed against
+      a recovered vault</td>
+      <td>DRAW, REFRESH (carried, not advanced, by LIQUIDATE and REDEEM)</td></tr>
+  <tr><td>global issuer <code>last_mint_height</code></td>
+      <td><b>non-strict</b> <code>le_32</code></td>
+      <td>every mint and ATTEST: a tick older than the anchor is rejected, closing the
+      stale-high-price mint (<a href="security.html#findings-ab">finding A</a> of the audit
+      trail)</td>
+      <td>OPEN, DRAW, POKE, ATTEST</td></tr>
+</table></div>
+
+<p>The asymmetry is deliberate. The vault ratchet is strict because there is per-position value
+to extract by same-height replay. The global anchor is non-strict because several borrowers must
+be able to mint against one fresh tick in the same block - strictness would serialize them for
+no security gain: there is nothing to over-extract by minting twice at one honest height
+<a class="src" href="source.html#issuer-L29">issuer.simf:29-33</a>.</p>
+
+<p>Both ratchets can only ever be advanced to a height that came out of a verified quorum, and
+REFRESH additionally demands proof of health - so no one can inflate a ratchet to brick a vault,
+and an owner cannot self-advance past a crash tick to dodge liquidation.</p>
+
+<h2 id="lockheight"><span class="sec">5</span>Why no upper freshness bound is needed</h2>
+
+<p>A natural worry: could a tick at an absurd far-future height (which BIP65 would read as a
+1985 timestamp) poison a ratchet ~9,500 years past any reachable block? It cannot. The
+<code>check_lock_height</code> jet computes</p>
+
+<pre><code>lockHeight(tx) = (tx.lockTime &lt; 500000000) ? tx.lockTime : 0     <span class="c">// always &lt; 5e8</span>
+check_lock_height(x) := x &lt;= lockHeight(tx)</code></pre>
+
+<p>so any <code>height &gt;= 500000000</code> is <b>unsatisfiable</b> - the transaction cannot be
+authored at all - and any height below it confirms only once the chain tip has passed it. A
+ratchet can therefore never be advanced beyond a reachable block; the far-future brick is
+structurally impossible. The <a href="security.html#trail">maturity re-audit</a> flagged this
+as its finding L-1 (the BIP65 far-future brick) and resolved it exactly as shown, by reading the
+jet's C source rather than trusting the covenant comment; an explicit
+<code>height &lt; 500000000</code> assert was added to both quorum bodies as documentation of
+the invariant
+<a class="src" href="source.html#vault-L120">vault.simf:120-126</a>.</p>
+
+<h2 id="trust"><span class="sec">6</span>What is trusted</h2>
+
+<ul>
+  <li>At most 2 of the 5 oracle keys are Byzantine. Under that bound, no under-backed mint and
+  no cheap seizure is possible; a colluding pair can still <b>censor</b> (withhold signatures),
+  which degrades liveness, not value - the intended trade.</li>
+  <li><code>backing_k</code> is off-chain data (aggregate backing is not readable per-transaction
+  on-chain) trusted to the same quorum; one honest signer bounds it, since all three accepted
+  signatures must cover the same field.</li>
+  <li>Freshness costs liveness: someone must POKE the issuer anchor and REFRESH dormant vaults.
+  This keeper duty is the price of having no clock; it is examined in
+  <a href="building.html#invariants">chapter Ιʹ</a>.</li>
+  <li>The one accepted price risk is an honest, sharp crash between ticks - real market movement
+  faster than the tick cadence, not archived data. Replay of archived data is what the ratchets
+  close.</li>
+</ul>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security model - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Ηʹ</span> · adversarial posture</div>
+  <h1>Security model</h1>
+  <p class="lede">A covenant protocol cannot patch. The security argument therefore has to be
+  made before the freeze, adversarially, and in writing. This chapter states the trust model,
+  shows how each fatal failure class is closed, records the audit trail that got it there, and
+  names the residual risks honestly.</p>
+</header>
+
+<h2 id="trust"><span class="sec">1</span>The trust model</h2>
+
+<ul>
+  <li><b>Oracles</b>: at most 2 of the 5 keys Byzantine. Under that bound no under-backed mint
+  and no cheap seizure is possible; two colluding keys can censor (a liveness loss), not
+  extract.</li>
+  <li><b>The deployer</b>: sets the genesis configuration once - five pairwise-distinct oracle
+  keys, the canonical NUMS, and every cross-covenant pin equal to its genuine compiled sibling.
+  This is unfixable after deployment and not checkable from inside a covenant; it is guarded by
+  a preflight (<a href="deployment.html">chapter Θʹ</a>) and is the single most important thing
+  to verify before shipping.</li>
+  <li><b>Keepers</b>: someone runs the liveness duties - POKE, REFRESH, and clearing the
+  deep-tail bad debt. All are permissionless; none require trust in a specific party.</li>
+  <li><b>Everything else is untrusted.</b> Owners, keepers, redeemers, and arbitrary third
+  parties are assumed adversarial, including in coalition.</li>
+</ul>
+
+<h2 id="classes"><span class="sec">2</span>The five fatal classes</h2>
+
+<p>The audits organize covenant failure into five classes; the re-audit verdict is that all
+five are closed at the covenant level under the trust model above.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Class</th><th>Attack shape</th><th>Closed by</th></tr>
+  <tr><td><b>Covenant bypass</b></td>
+      <td>move value without running the intended arm: key-path spend, smuggled second arm,
+      aliased covenant instances, wrong arm behind a token gate</td>
+      <td>NUMS unspendable key path; the one-unit token recursed on every issuer arm;
+      <code>current_index</code> self-pins on every covenant (vault 0, pot inflow 1, reserve 3,
+      poke 0, attest 4); relative pot reads at <code>current_index - 1</code></td></tr>
+  <tr><td><b>Data-identity substitution</b></td>
+      <td>feed a lookalike UTXO (decoy pot, sybil reserve, wrong-asset coin) or a swapped
+      state field into a covenant that reads a sibling</td>
+      <td>constant addresses pinned by flat scriptHash; script <b>and</b> asset <b>and</b>
+      amount pinned on every value-carrying output; state bound into reconstructed addresses,
+      so a wrong field yields a wrong address</td></tr>
+  <tr><td><b>Collateral theft</b></td>
+      <td>extract more than a rule permits: over-liquidate, seize a healthy vault, redeem par
+      from an under-backed pool, skim on a no-oracle path, or lie about the price</td>
+      <td>directional MIN / MAX quotes; hard extraction caps with protocol-favoring truncation;
+      the REPAY collateral-preservation assert; the strict per-vault ratchet plus permissionless
+      REFRESH; the redemption backing floor</td></tr>
+  <tr><td><b>Bad-debt creation</b></td>
+      <td>manufacture a shortfall the reserve must cover: conjure a vault, fake the pot growth,
+      or recapitalize an underwater vault from the reserve</td>
+      <td>issuer-attested bad debt (the genuineness check the reserve cannot make); the pinned
+      full-debt burn; strict pot growth forcing the ATTEST arm; the 20% per-vault cap making
+      conjured vaults a 4:1 self-loss</td></tr>
+  <tr><td><b>Griefing / halt</b></td>
+      <td>brick the mechanism: poison a ratchet, strand the reserve, block bad-debt
+      clearing</td>
+      <td>ratchets only advance to quorum-verified heights and REFRESH demands health; the
+      saturating reserve drain means every bad vault always closes; far-future heights are
+      unsatisfiable by the lock-height jet; conjured out-of-range vaults self-grief only</td></tr>
+</table></div>
+
+<h2 id="singletons"><span class="sec">3</span>The singletons cannot be burned</h2>
+
+<p>The pot, the issuer, and the reserve are single UTXOs that most operations must spend - a
+natural worry is whether a griefer can destroy one (spend it without recreating it) and brick
+the protocol. They cannot. Two locks close every spend path:</p>
+
+<ul>
+  <li><b>No key path.</b> Every singleton's taproot internal key is the NUMS point, so the only
+  way to spend it is a covenant leaf. A "NUMS" with a known discrete log would break this - which
+  is exactly why the deploy preflight asserts the canonical value
+  (<a href="deployment.html#preflight">chapter Θʹ</a>).</li>
+  <li><b>Every arm recreates the singleton.</b> There is no destroy arm and no arm with a missing
+  recursion pin - each one requires the UTXO to reappear at its own address:</li>
+</ul>
+
+<div class="tablewrap"><table>
+  <tr><th>Singleton</th><th>Arms</th><th>Recursion pin</th></tr>
+  <tr><td><b>Issuer</b></td><td>OPEN, DRAW, POKE, ATTEST</td>
+      <td>every arm ends in <code>recurse_token</code>: successor pinned to the issuer address,
+      <code>asset == ISSUER_TOKEN_ID</code>, <code>amount == 1</code>
+      <a class="src" href="source.html#issuer-L215">issuer.simf:215-222</a></td></tr>
+  <tr><td><b>Pot</b></td><td>inflow, outflow</td>
+      <td>both leaves pin <code>current_script_hash == output_script_hash(1)</code>; inflow is
+      grow-only, outflow releases only the issuer-pinned amount
+      <a class="src" href="source.html#reserve_repay-L36">reserve_repay.simf:36</a>, <a class="src" href="source.html#pot_outflow-L42">pot_outflow.simf:42</a></td></tr>
+  <tr><td><b>Reserve</b></td><td>accumulate, bad-debt</td>
+      <td>accumulate recurses to output 3 (grow-only), bad-debt to output 2 with a downward-only
+      self-defense; the shrink is authored by ATTEST
+      <a class="src" href="source.html#stability-L75">stability.simf:75-115</a></td></tr>
+</table></div>
+
+<p>So a singleton can only ever reappear at its own address, holding more (or, for the pot and
+reserve, exactly the covenant-pinned delta). It cannot leave the covenant, split, or vanish. The
+token additionally cannot duplicate - <code>amount == 1</code> makes single-unit uniqueness an
+invariant.</p>
+
+<p>What a griefer <b>can</b> do falls short of destruction:</p>
+<ul>
+  <li><b>Contend</b> - race for a singleton's current outpoint. This slows honest users but
+  destroys nothing; it is the throughput question, treated in
+  <a href="building.html#contention">chapter Ιʹ</a>.</li>
+  <li><b>Fragment</b> - donate an extra UTXO to <code>POT_SPK</code> or
+  <code>STABILITY_SPK</code>. The canonical singleton is untouched; the covenant cannot merge
+  fragments, so the donated value simply strands - <b>the griefer burns their own funds</b>, not
+  the protocol's. Honest builders track the canonical outpoint and ignore the rest (the decoy-pot
+  attack is separately closed by the relative <code>current_index - 1</code> read).</li>
+  <li><b>Poison an anchor</b> - closed: a ratchet only advances to a quorum-verified height, the
+  grow-only accumulate arm never advances it, and a far-future height is unsatisfiable
+  (<a href="oracle.html#lockheight">chapter Εʹ</a>).</li>
+</ul>
+
+<p class="fine">The un-burnability rests on the NUMS assumption and on deploy-config
+correctness, both preflight-checked. One economic edge is not griefing: if every unit of
+collateral is borrowed against, the pot can reach a zero-OBOL balance - the UTXO still exists,
+it is simply empty.</p>
+
+<h2 id="trail"><span class="sec">4</span>The audit trail</h2>
+
+<h3 id="findings-ab">Findings A and B - the internal exhaustive audit</h3>
+<p><b>A (stale-high mint).</b> The mint gates had no upper staleness bound: a signed tick is
+valid forever, and after a price fall an attacker could replay an old genuinely-signed high
+tick to mint OBOL backed below 150% of the true price, then feed the under-backed vault to the
+reserve. A was the motor, B the amplifier - one pump. Fixed by the global
+<code>last_mint_height</code> anchor on the issuer with permissionless POKE
+(<a href="oracle.html#freshness">chapter Εʹ</a>).</p>
+<p><b>B (bad-debt reserve drain).</b> The reserve's bad-debt arm self-authorized its shrink,
+trusting an unbound input 0: an attacker could stage a fake "vault" from a dust coin and burn
+self-owned OBOL to fake the debt - near-neutral at peg, a real theft of
+<code>(1 - p) x debt</code> under a de-peg to p, which is exactly when the backstop matters.
+Fixed by the issuer ATTEST arm (<a href="reserve.html#baddebt">chapter ΣΤʹ</a>).</p>
+
+<h3>The fresh-context audit - the delegated-amount class</h3>
+<p>A second audit round with fresh context (2026-07-02; four parallel reviewers with on-node
+proof-of-concepts, then converging passes) found the protocol architecturally sound and
+identified one real root cause the earlier rounds had missed:
+<b>amount delegation to a swappable branch</b>
+(<a href="architecture.html#delegated">chapter Βʹ</a>). Seven findings - four critical, two
+high, one low:</p>
+
+<ol>
+  <li><b>Critical.</b> REPAY had no collateral-preservation gate: a repay of zero with a dust
+  successor withdrew the full collateral. The proof-of-concept was accepted by elementsd.
+  Fix: <code>le_64(coll, output_amount(0))</code>.</li>
+  <li><b>Critical.</b> REFRESH-as-DRAW pot drain: the issuer's DRAW delegated the pot delta to
+  the vault's DRAW branch, but a REFRESH produced the same successor shape without shrinking
+  the pot. Fix: the issuer pins the pot delta itself.</li>
+  <li><b>High.</b> ATTEST force-close bypass: an underwater owner could co-run REPAY, keep a
+  zero-debt vault, and still collect the shortfall. Fix: ATTEST pins
+  <code>pot_out == pot_in + debt</code>.</li>
+  <li><b>High.</b> A zero price collapses <code>divide_64</code> to zero and with it the health
+  gate - a free mint. Fix: <code>price &gt; 0</code> per counted quote.</li>
+  <li><b>Low.</b> Fees divertible to a sybil reserve via the witness-chosen reserve ratchet.
+  Fix: the constant-address reserve.</li>
+  <li><b>Critical.</b> Reserve drain via a zero-amount DRAW: a d = 0 draw rode the grow-only
+  inflow leaf, freeing the token to sit at input 4 authoring nothing. Fix: <code>d &gt; 0</code>,
+  <code>principal &gt; 0</code>, pot read at <code>current_index - 1</code>, and strict pot
+  growth in the reserve arm.</li>
+  <li><b>Critical.</b> Pot drain via a decoy pot at the hardcoded index the issuer read. Fix:
+  read the pot at <code>current_index - 1</code>, adjacent to the token.</li>
+</ol>
+
+<p>All seven were fixed and <b>gold-standarded</b>: for each, the guard was temporarily disabled
+to confirm the proof-of-concept passes, then restored to confirm it fails - isolating each
+assert as the sole block. After the fixes, two further adversarial rounds found no new covenant
+break; the class is judged exhausted. The demo runner carries the results forward as 27 on-node
+negative tests, each rejected for exactly one controlled reason.</p>
+
+<h3>The maturity audit - M-1 and M-2</h3>
+<p><b>M-1 (conjured-vault drain, critical, mitigated).</b> A vault UTXO is byte-identical
+whether minted or conjured; ATTEST proves "currently underwater", not "ever minted". An
+attacker could conjure debt = D against dust collateral and pull ~1.05 x D from the reserve. No
+hard close exists - provenance is unobservable per-transaction, and a global debt accumulator
+would serialize every operation through one UTXO. Mitigated by the 20% per-vault cap: recover
+at most 20% of what you burn.</p>
+<p><b>M-2 (dormant-vault stale-tick replay, high, mitigated).</b> A passive owner's ratchet lags
+the tip, so an archived dip tick could seize a currently healthy vault - theft, not the accepted
+crash risk. A hard close is impossible (no chain-tip jet; a global freshness anchor would have
+to be spent by every removal, serializing them). Mitigated by moving REFRESH to the
+permissionless side of the witness sum: any keeper keeps any healthy vault fresh, and a
+refresh can neither harm the vault nor dodge liquidation (the health gate sits at the same
+quantile as the liquidation trigger).</p>
+
+<h3>The re-audit</h3>
+<p>Two rounds, ten lenses in total - reserve arithmetic, oracle freshness, bypass and identity,
+value conservation, griefing, harness fidelity, regression review of the hygiene edits,
+whole-transaction composition, Elements primitive footguns, and a from-scratch conservation
+check - plus verification of the lock-height jet against its C source. Result: zero covenant-code
+holes; all five classes confirmed closed; six hygiene items (tests, docs, defense-in-depth
+asserts, the preflight) closed on the way. One methodological lesson is recorded for future
+audits: single-reviewer all-clears were twice wrong in this project - one lens misjudged the
+conjured vault, and the L-1 lock-height question was only settled by reading the jet's C
+source, not the covenant comment.</p>
+
+<h2 id="residuals"><span class="sec">5</span>Accepted residuals</h2>
+
+<p>These are model boundaries, stated as such - not bugs:</p>
+
+<ul>
+  <li><b>An honest sharp crash between ticks.</b> Real market movement faster than the oracle
+  cadence can create bad debt. This is the risk the reserve exists for.</li>
+  <li><b>Keeper liveness.</b> POKE, REFRESH of dormant vaults, and the deep-tail clearing are
+  duties, not automatisms. An un-refreshed dormant vault remains exposed to M-2 replay; the
+  defense is decentralized, not absolute.</li>
+  <li><b>Oracle honesty and sourcing.</b> The 2-Byzantine bound, the trust in
+  <code>backing_k</code>, and the keeper's freedom to pick which three quotes to present (the
+  spread is the surface - <a href="oracle.html#directional">chapter Εʹ</a>).</li>
+  <li><b>Reserve economics.</b> A systemic gap deeper than the reserve ends in the graceful
+  soft de-peg, by explicit design choice.</li>
+  <li><b>The interest-free put</b> (<a href="economics.html#E-7">E-7</a>) and <b>redemption force-close</b> (<a href="economics.html#E-8">E-8</a>), both accepted
+  with rationale in <a href="economics.html#findings">chapter Ζʹ</a>.</li>
+  <li><b>Deploy-configuration correctness.</b> Preflight-checked, but unfixable after genesis;
+  the deployer is trusted once.</li>
+</ul>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

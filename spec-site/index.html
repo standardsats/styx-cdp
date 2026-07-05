@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STYX v1 - protocol specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Αʹ</span> · overview</div>
+  <h1>STYX: a covenant CDP on Liquid</h1>
+  <p class="lede">Lock L-BTC as collateral, mint OBOL, a USD-pegged debt token. Every rule -
+  who may mint, who may liquidate, what a keeper may take - is enforced by Simplicity covenants
+  on-chain. <b>No federation signs anything. No admin key exists.</b></p>
+</header>
+
+<div class="stats">
+  <div class="s"><div class="v">150<small>%</small></div><div class="k">min CR to open / draw</div></div>
+  <div class="s"><div class="v">130<small>%</small></div><div class="k">liquidation trigger</div></div>
+  <div class="s"><div class="v">3<small> of </small>5</div><div class="k">oracle quorum</div></div>
+  <div class="s"><div class="v">0<small>%</small></div><div class="k">interest</div></div>
+  <div class="s"><div class="v">5</div><div class="k">covenant programs</div></div>
+</div>
+
+<h2 id="what"><span class="sec">1</span>What STYX is</h2>
+
+<p>STYX is an interest-free, over-collateralized CDP (collateralized debt position) on the
+Liquid Network. Where other designs rely on a trusted signer set to authorize vault operations,
+STYX replaces the signer set entirely with covenants: taproot UTXOs
+whose spending conditions are Simplicity programs that read the transaction spending them and
+reject anything outside the protocol's rules. Opening a vault, drawing debt, liquidating an
+unhealthy position, redeeming OBOL for collateral - each of these is a plain Liquid transaction
+that any party can build, and the covenant is the only authority that accepts or rejects it.</p>
+
+<p>Liquid is the right substrate for three reasons: it has native issued assets (OBOL needs no
+separate token ledger), its tapscript introspection with 64-bit arithmetic and
+CHECKSIGFROMSTACK-style signature checks lets a UTXO enforce its own rules, and Simplicity is live
+on mainnet. The cost is accepted openly: Liquid is a federated sidechain, and protocol amounts are
+explicit (unblinded) so the covenants can read them.</p>
+
+<div class="why"><span class="lbl">Why the name</span>
+<p>The debt token is the obol, the coin paid to the ferryman for passage across the Styx. An
+obol either buys the crossing or it does not; there is no negotiating with the covenant.</p></div>
+
+<h2 id="promise"><span class="sec">2</span>The promise</h2>
+
+<p>The protocol maintains one central invariant: <b>every OBOL outside the pot is backed by at
+least its share of collateral, or has been genuinely retired.</b> Concretely:</p>
+
+<ul>
+  <li>No one can mint OBOL without locking collateral worth at least 150% of the debt,
+  priced at the most conservative (minimum) quote of a fresh oracle tick.</li>
+  <li>No one can take collateral out of a vault except through an operation the covenant
+  prices and caps: an owner-signed operation, a liquidation of a provably unhealthy vault, or a
+  redemption at the peg floor.</li>
+  <li>No one can forge mint authority. Every mint is serialized through a single covenant UTXO
+  holding a unique one-unit identity token that exists nowhere else and can never be reissued.</li>
+  <li>The OBOL supply is fixed at 100,000,000 forever. Both genesis issuances were made without a
+  reissuance token, so no minting-based bailout is even possible by construction.</li>
+  <li>When collateral genuinely falls short, the system degrades gracefully: a stability reserve
+  absorbs bounded shortfalls, and past its depth OBOL settles pro-rata at the true backing ratio
+  instead of rewarding a bank run.</li>
+</ul>
+
+<p>These claims were tested adversarially across several internal audit rounds: an exhaustive
+covenant-break audit, a fresh-context audit with on-node proof-of-concepts (seven findings, all
+fixed and gold-standarded), a maturity audit, and two rounds of economic and MEV review. The
+audit trail is summarized in <a href="security.html">chapter Ηʹ</a>.</p>
+
+<h2 id="assets"><span class="sec">3</span>The three assets</h2>
+
+<div class="tablewrap"><table>
+  <tr><th>Asset</th><th>Role</th><th>Properties</th></tr>
+  <tr><td><b>L-BTC</b></td><td>collateral</td>
+      <td>Liquid bitcoin, the POLICY asset. Locked explicitly (unblinded) in vaults and in the
+      stability reserve so the covenants can read amounts.</td></tr>
+  <tr><td><b>OBOL</b></td><td>debt token</td>
+      <td>USD-pegged, fixed non-reissuable supply of 100,000,000. Debt is denominated in cents.
+      The whole supply lives in the pot; it leaves only against a health-checked vault and
+      returns on repayment, liquidation, and redemption.</td></tr>
+  <tr><td><b>Identity token</b></td><td>mint authority</td>
+      <td>A separate one-unit non-reissuable asset held only by the issuer covenant. Deliberately
+      not OBOL's reissuance token - a reissuance token is minting power, and none exists.</td></tr>
+</table></div>
+
+<h2 id="families"><span class="sec">4</span>The four covenant families</h2>
+
+<p>All protocol state lives in four families of taproot UTXOs. Their internal key is a
+nothing-up-my-sleeve point, so the key path is unspendable and the Simplicity leaf is the only
+way to move them.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>UTXO</th><th>Holds</th><th>One-line rule</th></tr>
+  <tr><td><b>Vault</b> (one per position)</td><td>L-BTC collateral</td>
+      <td>State (debt, owner, freshness height) is committed in the address itself; every
+      operation must reconstruct a correct successor or close the vault against a full
+      repayment.</td></tr>
+  <tr><td><b>Pot</b> (one, constant address)</td><td>the OBOL supply</td>
+      <td>Grows freely; shrinks only when the issuer's identity token co-signs the transaction
+      by being spent alongside it.</td></tr>
+  <tr><td><b>Issuer</b> (one, singleton)</td><td>the identity token</td>
+      <td>The only covenant that reconstructs vaults; every mint and every bad-debt attestation
+      serializes through it. Carries the global mint-freshness anchor.</td></tr>
+  <tr><td><b>Stability reserve</b> (one, constant address)</td><td>L-BTC backstop</td>
+      <td>Grows from fees; shrinks only for an issuer-attested bad-debt event, and only within
+      a per-vault cap.</td></tr>
+</table></div>
+
+<p>The map of how these reference each other - and why the reference graph must be a DAG - is
+the subject of <a href="architecture.html">chapter Βʹ</a>. An
+<a href="diagram.html">interactive diagram</a> of the whole system accompanies this spec.</p>
+
+<h2 id="reading"><span class="sec">5</span>How to read this specification</h2>
+
+<p><b>This specification is the source of truth for STYX v1.</b> It is the narrative synthesis
+of the design, audit, and economics record behind the frozen covenant, and every behavioral
+claim in it was verified assert-by-assert against that source before the freeze. Any
+implementation must match what these chapters state. The covenant source itself ships with the
+deployed artifacts and is pinned exactly by the golden CMRs in
+<a href="deployment.html">chapter Θʹ</a>; cross-references in the text look like
+<a class="src" href="source.html#vault-L346">vault.simf:346</a> and point into it, so a reader holding the covenant
+files can re-verify any claim.</p>
+
+<p>The v1 covenant source is frozen as of 2026-07-03. The freeze is enforced by a golden-CMR
+test: any change to covenant behavior flips a commitment Merkle root and fails the gate. The
+five frozen CMRs are recorded in <a href="deployment.html">chapter Θʹ</a>. This site documents
+v1; a future v2 gets its own versioned spec, not an edit of this one.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

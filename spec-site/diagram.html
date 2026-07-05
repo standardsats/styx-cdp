@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STYX v1 - interactive architecture diagram</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root {
+    --bg: #0b0e12; --bg-deep: #07090c; --surface: #10141a; --surface2: #161b23;
+    --ink: #eae5d6; --body: #b9b3a3; --muted: #7e7b6e;
+    --line: #222933; --line-soft: #1a2028;
+    --gold: #c8a45c; --gold-soft: rgba(200,164,92,0.12);
+    --olive: #93ad84; --river: #7fa3bc;
+    --zone: rgba(234,229,214,0.02); --zone-line: #222933;
+    --display: "GFS Didot", Georgia, serif;
+    --serif: "Source Serif 4", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--serif);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 11px 20px; border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .bar h1 { font-family: var(--display); font-weight: 400; font-size: 19px; color: var(--ink); letter-spacing: 0.06em; }
+  .bar h1 b { color: var(--gold); font-weight: 400; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .bar a.back { font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  .bar a.back:hover { color: var(--gold); border-color: var(--gold); }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.03em;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--gold); border-color: var(--gold); color: var(--bg-deep); }
+  .chip.struct.on { background: var(--river); border-color: var(--river); color: var(--bg-deep); }
+  .chip.lifecycle { border-color: var(--gold); color: var(--gold); }
+  .chip.lifecycle:hover { background: var(--gold-soft); }
+  .chip.lifecycle.on { background: var(--gold); color: var(--bg-deep); }
+
+  .stage { flex: 1; position: relative; min-height: 0; }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10px; fill: var(--muted); opacity: 0.75; }
+
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; transition: stroke .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--gold) !important; stroke-width: 2.2; }
+  .node .t  { font-family: var(--serif); font-size: 15px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .k  { font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--gold); pointer-events: none; }
+  .node .m  { font-family: var(--mono); font-size: 11px; fill: var(--muted); pointer-events: none; }
+  .node.cov rect { stroke-width: 2; }
+  .node.oracle rect { fill: var(--gold-soft); stroke: var(--gold); }
+  .node.asset rect { fill: var(--surface2); stroke-dasharray: 6 3; }
+  .node.asset .k { fill: var(--muted); }
+  .node.actor .k { fill: var(--olive); }
+  .node .val { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--gold); opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  .stage.lc .node .val { opacity: 1; }
+  .stage.lc.flowing .node:not(.lit) .val { opacity: 0.45; }
+
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#a-mut); transition: opacity .2s ease, stroke .2s ease; }
+  .edge.val { stroke: var(--olive); marker-end: url(#a-olive); stroke-width: 1.9; }
+  .edge.orc { stroke: var(--gold); marker-end: url(#a-gold); stroke-dasharray: 5 4; }
+  .edge.cmr { stroke: var(--river); marker-end: url(#a-blue); stroke-dasharray: 2 5; stroke-width: 1.8; }
+  .elbl { font-family: var(--mono); font-size: 10px; fill: var(--muted); transition: opacity .2s ease; }
+
+  .stage.flowing .edge { opacity: 0.10; }
+  .stage.flowing .elbl { opacity: 0.10; }
+  .stage.flowing .node { opacity: 0.26; }
+  .stage.flowing .zone { opacity: 0.5; }
+  .stage.flowing .edge.lit {
+    opacity: 1; stroke: var(--gold); marker-end: url(#a-goldlit);
+    stroke-dasharray: 7 5; animation: march 0.9s linear infinite;
+  }
+  .stage.flowing.struct .edge.lit {
+    stroke: var(--river); marker-end: url(#a-blue); animation: march 1.4s linear infinite;
+  }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--gold); }
+  .stage.flowing.struct .elbl.lit { fill: var(--river); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--gold); }
+  .stage.flowing.struct .node.lit rect { stroke: var(--river); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  .legend text { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  .legend line { stroke-width: 2; }
+
+  .card {
+    position: absolute; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  }
+  #detail { right: 16px; bottom: 16px; width: 350px; }
+  #detail h3 { font-family: var(--display); font-weight: 400; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.04em; }
+  #detail p { font-size: 12.5px; line-height: 1.58; }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--river); }
+  #detail p b, #flowcap b { color: var(--ink); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 500px; display: none; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--gold); margin-bottom: 7px; }
+  #flowcap.struct .fname { color: var(--river); }
+  #flowcap ol { margin-left: 18px; }
+  #lc-bar { display: none; align-items: center; gap: 8px; margin-bottom: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft); }
+  #flowcap.lc #lc-bar { display: flex; }
+  #lc-bar button {
+    font-family: var(--mono); font-size: 12px; line-height: 1; width: 26px; height: 24px;
+    border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer;
+  }
+  #lc-bar button:hover { border-color: var(--gold); color: var(--gold); }
+  #lc-count { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; color: var(--muted); }
+  #lc-dots { display: flex; gap: 4px; margin-left: auto; }
+  #lc-dots span { width: 7px; height: 7px; border-radius: 999px; background: var(--line); cursor: pointer; transition: background .15s ease; }
+  #lc-dots span.done { background: var(--gold-soft); }
+  #lc-dots span.cur { background: var(--gold); }
+  #lc-narr { font-size: 12px; line-height: 1.5; color: var(--body); margin-bottom: 8px; }
+  #lc-narr b { color: var(--ink); }
+  #flowcap li { font-size: 12.5px; line-height: 1.55; margin-bottom: 2px; }
+  .src { position: absolute; top: 9px; right: 16px; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: 0.8; }
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .stage { min-height: 78vh; }
+    #detail { position: static; width: auto; margin: 10px 16px; }
+    #flowcap { position: static; margin: 0 16px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>ΣΤΥ<b>Ξ</b> v1 - the covenant CDP</h1>
+    <div class="sub">four covenant UTXOs · one oracle quorum · no federation</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">Everything</button>
+    <button class="chip lifecycle" data-flow="lifecycle">&#9654; Full lifecycle</button>
+    <button class="chip" data-flow="open">Open</button>
+    <button class="chip" data-flow="draw">Draw</button>
+    <button class="chip" data-flow="repay">Repay</button>
+    <button class="chip" data-flow="close">Close</button>
+    <button class="chip" data-flow="refresh">Refresh</button>
+    <button class="chip" data-flow="liquidate">Liquidate</button>
+    <button class="chip" data-flow="fulliq">Full-liq</button>
+    <button class="chip" data-flow="baddebt">Bad-debt</button>
+    <button class="chip" data-flow="redeem">Redeem</button>
+    <button class="chip" data-flow="poke">Poke</button>
+    <button class="chip struct" data-flow="cmr">CMR graph</button>
+  </div>
+  <a class="back" href="index.html">spec &lsaquo;</a>
+</div>
+
+<div class="stage" id="stage">
+<svg viewBox="0 0 1600 980" preserveAspectRatio="xMidYMid meet" role="img" aria-label="STYX v1 covenant CDP architecture diagram">
+  <defs>
+    <marker id="a-mut"     viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/></marker>
+    <marker id="a-goldlit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--gold)"/></marker>
+    <marker id="a-olive"   viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--olive)"/></marker>
+    <marker id="a-gold"    viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--gold)"/></marker>
+    <marker id="a-blue"    viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--river)"/></marker>
+  </defs>
+
+  <!-- zones -->
+  <g class="zone">
+    <rect x="40" y="150" width="250" height="620" rx="16"/>
+    <text class="ztitle" x="60" y="180">Actors</text>
+    <text class="zsub" x="60" y="198">no privileged signer</text>
+  </g>
+  <g class="zone">
+    <rect x="330" y="150" width="690" height="700" rx="16"/>
+    <text class="ztitle" x="352" y="180">Covenant UTXOs · Simplicity on Liquid</text>
+    <text class="zsub" x="352" y="198">each one enforces its own rule on-chain</text>
+  </g>
+  <g class="zone">
+    <rect x="1060" y="150" width="500" height="500" rx="16"/>
+    <text class="ztitle" x="1082" y="180">On-chain assets</text>
+    <text class="zsub" x="1082" y="198">native Liquid issued assets</text>
+  </g>
+
+  <!-- edges -->
+  <path class="edge act" id="e-own-v"  d="M270,243 C 318,246 345,250 370,252"/>
+  <path class="edge act" id="e-own-i"  d="M150,295 C 195,432 290,492 370,500"/>
+  <path class="edge act" id="e-keep-v" d="M270,400 C 320,398 346,330 370,322"/>
+  <path class="edge act" id="e-red-v"  d="M270,560 C 332,548 346,378 370,362"/>
+  <path class="edge orc" id="e-orc-v"  d="M745,140 C 660,168 558,188 505,208"/>
+  <path class="edge orc" id="e-orc-i"  d="M672,140 C 558,300 472,420 460,470"/>
+  <path class="edge val" id="e-v-pot"  d="M650,278 L708,278"/>
+  <path class="edge cmr" id="e-i-v"    d="M485,470 L485,392"/>
+  <path class="edge cmr" id="e-i-pot"  d="M650,500 C 720,490 748,436 770,392"/>
+  <path class="edge val" id="e-i-s"    d="M650,560 L708,560"/>
+  <path class="edge val" id="e-v-s"    d="M590,392 C 640,430 690,455 740,470"/>
+  <path class="edge cmr" id="e-s-pot"  d="M858,470 L858,392"/>
+
+  <!-- edge labels -->
+  <text class="elbl" data-e="e-own-v"  x="296" y="236">owner sig</text>
+  <text class="elbl" data-e="e-own-i"  x="232" y="450">open</text>
+  <text class="elbl" data-e="e-keep-v" x="284" y="356">liquidate</text>
+  <text class="elbl" data-e="e-red-v"  x="296" y="486">redeem</text>
+  <text class="elbl" data-e="e-orc-v"  x="612" y="180">tick</text>
+  <text class="elbl" data-e="e-orc-i"  x="516" y="372" text-anchor="middle">tick</text>
+  <text class="elbl" data-e="e-v-pot"  x="679" y="270" text-anchor="middle">OBOL</text>
+  <text class="elbl" data-e="e-i-v"    x="492" y="436">reconstructs</text>
+  <text class="elbl" data-e="e-i-pot"  x="700" y="452">token gate</text>
+  <text class="elbl" data-e="e-i-s"    x="680" y="648" text-anchor="middle">fee · attest</text>
+  <text class="elbl" data-e="e-v-s"    x="636" y="446">fees</text>
+  <text class="elbl" data-e="e-s-pot"  x="864" y="440">reads pot</text>
+
+  <!-- actors -->
+  <g class="node actor" data-k="owner">
+    <rect x="70" y="200" width="200" height="95" rx="10"/>
+    <text class="t" x="90" y="230">Vault owner</text>
+    <text class="m" x="90" y="254">signs close / repay /</text>
+    <text class="m" x="90" y="272">draw · opens vaults</text>
+  </g>
+  <g class="node actor" data-k="keeper">
+    <rect x="70" y="360" width="200" height="95" rx="10"/>
+    <text class="t" x="90" y="390">Keeper · anyone</text>
+    <text class="m" x="90" y="414">liquidate · bad-debt</text>
+    <text class="m" x="90" y="432">refresh · poke</text>
+  </g>
+  <g class="node actor" data-k="redeemer">
+    <rect x="70" y="520" width="200" height="95" rx="10"/>
+    <text class="t" x="90" y="550">OBOL holder</text>
+    <text class="m" x="90" y="574">redeems OBOL for</text>
+    <text class="m" x="90" y="592">collateral at the floor</text>
+  </g>
+
+  <!-- oracle -->
+  <g class="node oracle" data-k="oracle">
+    <rect x="590" y="48" width="340" height="92" rx="10"/>
+    <text class="t" x="612" y="80">3-of-5 oracle quorum</text>
+    <text class="k" x="612" y="100">exactly 3 sign · timelocked tick</text>
+    <text class="m" x="612" y="124">MIN to mint · MAX to remove value</text>
+    <text class="val" id="val-oracle" x="912" y="80" text-anchor="end"></text>
+  </g>
+
+  <!-- covenants -->
+  <g class="node cov" data-k="vault">
+    <rect x="370" y="210" width="280" height="182" rx="10"/>
+    <text class="t" x="392" y="240">Vault</text>
+    <text class="k" x="392" y="259">holds L-BTC · always input 0</text>
+    <text class="m" x="392" y="285">taproot: leaf(CMR) + data(debt,owner,h)</text>
+    <text class="m" x="392" y="305">owner: close · repay · draw</text>
+    <text class="m" x="392" y="325">anyone: liquidate · full-liq</text>
+    <text class="m" x="392" y="345">bad-debt · redeem · refresh</text>
+    <text class="m" x="392" y="372">freshness ratchet · one vault / tx</text>
+    <text class="val" id="val-vault" x="632" y="237" text-anchor="end"></text>
+  </g>
+  <g class="node cov" data-k="pot">
+    <rect x="710" y="210" width="280" height="182" rx="10"/>
+    <text class="t" x="732" y="240">OBOL pot</text>
+    <text class="k" x="732" y="259">the OBOL supply · references nobody</text>
+    <text class="m" x="732" y="285">inflow: repay / close / liquidate /</text>
+    <text class="m" x="732" y="305">  redeem / bad-debt  (grow-only)</text>
+    <text class="m" x="732" y="329">outflow: open / draw (token-gated)</text>
+    <text class="m" x="732" y="362">pinned by a flat POT_SPK</text>
+    <text class="val" id="val-pot" x="972" y="237" text-anchor="end"></text>
+  </g>
+  <g class="node cov" data-k="issuer">
+    <rect x="370" y="470" width="280" height="150" rx="10"/>
+    <text class="t" x="392" y="500">Issuer</text>
+    <text class="k" x="392" y="519">holds the 1-unit identity token</text>
+    <text class="m" x="392" y="545">only OBOL minter (open · draw)</text>
+    <text class="m" x="392" y="565">bad-debt attester · builds vaults</text>
+    <text class="m" x="392" y="585">global mint anchor · poke</text>
+  </g>
+  <g class="node cov" data-k="stability">
+    <rect x="710" y="470" width="280" height="150" rx="10"/>
+    <text class="t" x="732" y="500">Stability reserve</text>
+    <text class="k" x="732" y="519">L-BTC backstop · constant address</text>
+    <text class="m" x="732" y="545">accumulate: fees (grow-only)</text>
+    <text class="m" x="732" y="565">bad-debt: issuer-attested shrink,</text>
+    <text class="m" x="732" y="585">  capped at 20% of debt per vault</text>
+    <text class="val" id="val-stab" x="972" y="497" text-anchor="end"></text>
+  </g>
+
+  <!-- assets -->
+  <g class="node asset" data-k="obol">
+    <rect x="1090" y="210" width="450" height="92" rx="10"/>
+    <text class="t" x="1112" y="242">OBOL</text>
+    <text class="k" x="1112" y="261">USD-pegged · the pot is its only supply</text>
+    <text class="m" x="1112" y="287">fixed 100,000,000 · non-reissuable · debt in cents</text>
+  </g>
+  <g class="node asset" data-k="lbtc">
+    <rect x="1090" y="350" width="450" height="92" rx="10"/>
+    <text class="t" x="1112" y="382">L-BTC</text>
+    <text class="k" x="1112" y="401">the collateral</text>
+    <text class="m" x="1112" y="427">locked in vaults + the stability reserve</text>
+  </g>
+  <g class="node asset" data-k="token">
+    <rect x="1090" y="490" width="450" height="80" rx="10"/>
+    <text class="t" x="1112" y="522">Identity token</text>
+    <text class="k" x="1112" y="541">unique 1-unit · non-reissuable</text>
+    <text class="m" x="1112" y="560">held only by the issuer - gates every mint</text>
+  </g>
+
+  <!-- legend -->
+  <g class="legend">
+    <line x1="60" y1="662" x2="96" y2="662" style="stroke: var(--olive)"/>
+    <text x="104" y="666">value flow (OBOL / L-BTC)</text>
+    <line x1="60" y1="686" x2="96" y2="686" style="stroke: var(--gold)" stroke-dasharray="5 4"/>
+    <text x="104" y="690">oracle price tick</text>
+    <line x1="60" y1="710" x2="96" y2="710" style="stroke: var(--river)" stroke-dasharray="2 5"/>
+    <text x="104" y="714">identity pin (CMR or flat)</text>
+    <line x1="60" y1="734" x2="96" y2="734" style="stroke: var(--muted)"/>
+    <text x="104" y="738">actor action</text>
+  </g>
+</svg>
+
+  <div class="src">frozen covenant · 2026-07-03 · golden-CMR pinned</div>
+
+  <div class="card" id="flowcap">
+    <div id="lc-bar">
+      <button id="lc-prev" title="Previous step">&#9664;</button>
+      <button id="lc-play" title="Play / pause">&#10074;&#10074;</button>
+      <button id="lc-next" title="Next step">&#9654;</button>
+      <span id="lc-count"></span>
+      <span id="lc-dots"></span>
+    </div>
+    <div id="lc-narr"></div>
+    <div class="fname" id="f-name"></div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <div class="card" id="detail">
+    <h3 id="d-title">Click any box</h3>
+    <div class="meta" id="d-meta">- or pick an operation above</div>
+    <p id="d-body">Every box is a covenant, an actor, or an on-chain asset. The chips light up each operation's transaction path and animate the value flow. <b>CMR graph</b> shows which covenant pins which - the dependency DAG that makes the whole thing buildable.</p>
+  </div>
+</div>
+
+<script>
+const DETAIL = {
+  oracle:    { t:"3-of-5 oracle quorum", m:"external · BIP-340 over one tick", b:"Five keys are genesis parameters; <b>exactly three</b> sign <code>sha256(height || price || backing_k)</code> at a shared height. <code>verify_quorum</code> verifies the three signatures, anchors the tick to a reached block via <code>check_lock_height</code>, and returns <b>(MIN, MAX)</b>. Aggregation is <b>directional</b>: minting proves health at MIN, removing collateral is judged at MAX - so a single lying oracle can never push the price in the dangerous direction. Tolerates 2 offline and 2 Byzantine keys." },
+  owner:     { t:"Vault owner", m:"actor · holds the owner key", b:"Opens the vault and signs the owner ops with <code>sig_all_hash</code>: <b>repay</b> (lower debt, collateral may not shrink), <b>draw</b> (borrow more, 150% re-proven at MIN), and <b>close</b> (return the full debt, free the collateral). The only privileged party - and only over its own vault. REFRESH is deliberately not owner-only." },
+  keeper:    { t:"Keeper - anyone", m:"actor · permissionless", b:"No account, no whitelist. Below CR 130% anyone may <b>partially liquidate</b>; in CR [100%, 115%] anyone runs a <b>full liquidation</b>; below CR 100% a <b>bad-debt</b> clear backed by the reserve. Keepers also <b>poke</b> the issuer's mint anchor and <b>refresh</b> dormant healthy vaults - the liveness duties that keep the ratchets meaningful." },
+  redeemer:  { t:"OBOL holder", m:"actor · permissionless", b:"Any holder can <b>redeem</b> x OBOL for collateral valued at <code>min(par, backing_k)</code> minus the 0.5% fee, at the MAX quote - the peg floor. No permission, no health check; it shrinks a vault's debt and pays the holder collateral. When the system is under-backed the floor settles pro-rata at the true backing ratio instead of rewarding a bank run." },
+  vault:     { t:"Vault covenant", m:"covenant UTXO · holds L-BTC", b:"<code>taproot(NUMS, leaf(VAULT_CMR) + data(debt, owner, last_height))</code>. The data leaf is an unspendable <code>OP_RETURN</code>, so the covenant is the only spend path. One nested-sum <code>OP</code> witness dispatches all 8 ops. It pins the pot and the reserve by flat scriptHashes, requires <code>current_index == 0</code> (one vault per tx), and carries the strict <b>freshness ratchet</b> so an archived tick cannot be replayed." },
+  pot:       { t:"OBOL pot", m:"covenant UTXO · holds the OBOL supply", b:"The whole supply lives at one constant address, and the covenant <b>reconstructs nobody</b> - it is the compile root, which is what lets everyone pin it by a flat scriptHash without a CMR cycle. Two leaves: <b>inflow</b> (always at input 1, grow-only) and <b>outflow</b> (releases OBOL only when the issuer's token is co-spent at the adjacent input). Outstanding OBOL = supply - pot balance." },
+  issuer:    { t:"Issuer covenant", m:"covenant UTXO · holds the token", b:"Holds the unique 1-unit token and is the <b>only</b> covenant that reconstructs vaults. Four arms: <b>open</b> (new vault at 150% MIN, 0.5% L-BTC fee to the reserve, debt = principal), <b>draw</b> (pins the pot delta, d &gt; 0), <b>poke</b> (advance the global <code>last_mint_height</code> anchor, pinned to input 0), and <b>attest</b> (vouch for a genuine underwater vault and author the reserve's bad-debt payout). Every arm recurses the token: asset and amount == 1, forever." },
+  stability: { t:"Stability reserve", m:"covenant UTXO · holds L-BTC", b:"A single constant address, no data leaf, pinned by a flat <code>STABILITY_SPK</code>. <b>Accumulate</b> grows it (the 0.5% borrow and redemption fees, 5% of each partial liquidation, a third of each full-liq excess). <b>Bad-debt</b> is its one shrink path: gated on the issuer token at input 4 and on the pot strictly growing - which only the ATTEST arm does - and it self-defends only downward; the exact payout <code>min(shortfall + 5% bounty, 20% cap, balance)</code> is authored by the issuer." },
+  obol:      { t:"OBOL", m:"asset · USD-pegged debt token", b:"A native Liquid issued asset. Minted only through the token-gated pot against a health-checked vault; returns on repay, liquidation, and redemption. Supply fixed at <b>100,000,000</b> forever - the genesis issuance carries no reissuance token, so no minting-based bailout is possible by construction. Debt is denominated in cents." },
+  lbtc:      { t:"L-BTC", m:"asset · the collateral", b:"Liquid bitcoin, locked explicitly (unblinded) so the covenants can read amounts - a blinded output fails the covenant's explicit-read and is simply unusable as a protocol output. Sits in the vaults and the stability reserve; released to the owner on close, the keeper on liquidation, the holder on redeem." },
+  token:     { t:"Identity token", m:"asset · 1-unit, non-reissuable", b:"A separate genesis asset - deliberately NOT OBOL's reissuance token, which would be unlimited minting power. Exactly one unit exists, covenant-trapped in the issuer, and the pot's outflow leaf checks it is co-spent at <code>current_index + 1</code>. A non-CMR identity that breaks what would otherwise be a covenant cycle." },
+};
+
+const FLOWS = {
+  open: {
+    name: "OPEN - mint OBOL against new collateral",
+    edges: ["e-own-i","e-orc-i","e-i-v","e-i-pot","e-i-s"],
+    nodes: ["owner","oracle","issuer","pot","vault","stability","obol","lbtc"],
+    steps: [
+      "Inputs <code>[pot, issuer, collateral, reserve]</code>; the issuer arm reads the pot at <code>current_index - 1</code>",
+      "150% health at the <b>MIN</b> quote; the new vault is reconstructed at output 0 with <code>debt = principal</code>",
+      "The token-gated pot releases <code>principal</code> OBOL; a 0.5% <b>L-BTC</b> fee is pinned into the reserve"
+    ]
+  },
+  draw: {
+    name: "DRAW - borrow more on an existing vault",
+    edges: ["e-own-v","e-orc-v","e-i-v","e-i-pot","e-v-pot"],
+    nodes: ["owner","oracle","vault","issuer","pot","obol"],
+    steps: [
+      "Owner signs; inputs <code>[vault, pot, issuer]</code>. The tick must be strictly newer than <code>last_height</code> - DRAW advances the ratchet",
+      "The vault verifies the quorum and 150% at <b>MIN</b>; the issuer inherits the height by reconstructing the same successor",
+      "The issuer pins <code>pot_out == pot_in - d</code> with <code>d &gt; 0</code>; the pot releases <code>d</code> OBOL"
+    ]
+  },
+  repay: {
+    name: "REPAY - lower the debt (owner)",
+    edges: ["e-own-v","e-v-pot"],
+    nodes: ["owner","vault","pot","obol"],
+    steps: [
+      "Owner signs; inputs <code>[vault, pot, payer OBOL, fee coin]</code> - <code>r</code> OBOL returns into the genuine pot (both ends POT_SPK-pinned)",
+      "The vault recurses to <code>debt - r</code>; <code>last_height</code> carries forward",
+      "No oracle - and therefore no withdrawal: <b>collateral may not shrink</b>, the fee comes from a separate coin"
+    ]
+  },
+  close: {
+    name: "CLOSE - repay in full, free the collateral (owner)",
+    edges: ["e-own-v","e-v-pot"],
+    nodes: ["owner","vault","pot","obol","lbtc"],
+    steps: [
+      "Owner signs; the <b>full debt</b> returns to the pot - exactly the OBOL the vault minted, since <code>debt = principal</code>",
+      "The vault is consumed - no successor",
+      "All collateral is released to the owner"
+    ]
+  },
+  refresh: {
+    name: "REFRESH - keep a healthy vault fresh (anyone)",
+    edges: ["e-keep-v","e-orc-v"],
+    nodes: ["keeper","oracle","vault"],
+    steps: [
+      "<b>Permissionless</b>: any keeper presents a tick newer than <code>last_height</code> and proves CR &gt;= 130% at the <b>MAX</b> quote",
+      "Advances the freshness ratchet so an archived dip tick can no longer touch the vault",
+      "Debt unchanged, collateral not reduced - a refresh can neither harm the vault nor dodge liquidation"
+    ]
+  },
+  liquidate: {
+    name: "LIQUIDATE - partial heal-to-band (anyone)",
+    edges: ["e-keep-v","e-orc-v","e-v-pot","e-v-s"],
+    nodes: ["keeper","oracle","vault","pot","stability","obol","lbtc"],
+    steps: [
+      "Gate: CR &lt; 130% at the <b>MAX</b> quote, tick strictly newer than <code>last_height</code>",
+      "Keeper repays <code>dd</code> OBOL into the pot; the residual vault is healed into CR <b>[132%, 137%]</b>",
+      "Keeper extracts at most <b>1.15 x dd</b>; the 15% penalty splits keeper 10% / reserve 5% of dd"
+    ]
+  },
+  fulliq: {
+    name: "FULL-LIQ - close out CR [100%, 115%] (anyone)",
+    edges: ["e-keep-v","e-orc-v","e-v-pot","e-v-s"],
+    nodes: ["keeper","oracle","vault","pot","stability","obol","lbtc"],
+    steps: [
+      "Gate: CR in <b>[100%, 115%]</b> at the MAX quote - the band where a partial heal is arithmetically impossible",
+      "Keeper repays the <b>full debt</b> into the pot and seizes the collateral; the vault closes",
+      "The excess above par splits <b>2:1 keeper : reserve</b> - continuous with a partial at the 115% boundary"
+    ]
+  },
+  baddebt: {
+    name: "BAD-DEBT - the reserve covers a capped shortfall (anyone)",
+    edges: ["e-keep-v","e-orc-v","e-orc-i","e-i-v","e-i-s","e-v-pot","e-s-pot"],
+    nodes: ["keeper","oracle","vault","pot","stability","issuer","obol","lbtc"],
+    steps: [
+      "Gate: CR &lt; 100% at MAX. The keeper burns the <b>full debt</b> into the pot; the vault is forced to close",
+      "The issuer <b>ATTEST</b> arm reconstructs the genuine vault at input 0, sizes the shortfall, and authors the reserve shrink",
+      "The reserve pays <code>min(shortfall + 5% bounty, 20% of debt, balance)</code> - saturating, so an empty reserve never bricks the clear"
+    ]
+  },
+  redeem: {
+    name: "REDEEM - OBOL for collateral at the peg floor (anyone)",
+    edges: ["e-red-v","e-orc-v","e-v-pot","e-v-s"],
+    nodes: ["redeemer","oracle","vault","pot","stability","obol","lbtc"],
+    steps: [
+      "Holder pays x OBOL into the pot; receives collateral worth <code>x · min(par, backing_k)</code> minus the 0.5% fee, at MAX",
+      "The vault recurses to <code>debt - x</code>; the fee is pinned into the reserve",
+      "The tick must be newer than <code>last_height</code>, but the ratchet is <b>not</b> advanced (a self-redeem can't dodge liquidation)"
+    ]
+  },
+  poke: {
+    name: "POKE - advance the issuer's mint anchor (anyone)",
+    edges: ["e-orc-i"],
+    nodes: ["oracle","issuer"],
+    steps: [
+      "Anyone presents a fresher tick; the issuer advances <code>last_mint_height</code> with no value moving",
+      "Pinned to <code>current_index == 0</code>, so a poke can never be smuggled into another tx to satisfy a token gate",
+      "Keeping the anchor near the tip is what closes the stale-high-price mint window"
+    ]
+  },
+  cmr: {
+    name: "CMR graph - who pins whom",
+    struct: true,
+    edges: ["e-i-v","e-i-pot","e-i-s","e-v-pot","e-v-s","e-s-pot"],
+    nodes: ["vault","issuer","pot","stability"],
+    steps: [
+      "<code>X -&gt; Y</code> means X carries Y's identity as a compile-time parameter. The graph must be a <b>DAG</b> - mutual CMR reconstruction is unbuildable",
+      "The pot is the root (references nobody); the issuer is the only vault-reconstructor - the single true CMR edge <code>I -&gt; V</code>",
+      "Compile order: <b>POT -&gt; STABILITY -&gt; VAULT -&gt; ISSUER</b>. All other edges are flat scriptHash pins, breaking every would-be cycle"
+    ]
+  }
+};
+
+// Illustrative play-through, consistent with the frozen parameters:
+// debt = principal, 0.5% L-BTC borrow fee to the reserve, heal band [132,137],
+// full-liq band [100,115] with a 2:1 split, bad-debt capped at 20% of debt.
+const LIFECYCLE = [
+  { flow:"open",      oracle:"quote $120,000", vault:"A · 1.00 BTC · $50,000", pot:"-50,000 OBOL", stab:"0.502 BTC",
+    narr:"<b>$120k.</b> Vault A opens: lock 1.0 L-BTC, mint $50,000 OBOL (debt = principal). The 0.5% fee ($250 in L-BTC) goes to the reserve." },
+  { flow:"repay",     oracle:"-",              vault:"A · 1.00 BTC · $40,000", pot:"+10,000 OBOL", stab:"0.502 BTC",
+    narr:"<b>$120k.</b> The owner repays $10,000 - OBOL flows back into the pot. No oracle needed; collateral may not shrink." },
+  { flow:"draw",      oracle:"quote $120,000", vault:"A · 1.00 BTC · $50,000", pot:"-10,000 OBOL", stab:"0.502 BTC",
+    narr:"<b>$120k.</b> The owner draws $10,000 more; 150% re-proven at the MIN quote, the vault's ratchet advances." },
+  { flow:"refresh",   oracle:"quote $120,000", vault:"A · 1.00 BTC · $50,000", pot:"·", stab:"0.502 BTC",
+    narr:"<b>$120k.</b> A keeper refreshes A (CR 240% &gt;= 130% at MAX), so an archived dip tick can never touch it." },
+  { flow:"close",     oracle:"-",              vault:"B · closed", pot:"+50,000 OBOL", stab:"0.502 BTC",
+    narr:"<b>$120k.</b> Vault B closes: its full $50,000 debt returns to the pot - exactly the OBOL it minted - and the collateral is freed." },
+  { flow:"liquidate", oracle:"MAX $63,000",    vault:"A · 0.62 BTC · $29,000", pot:"+21,000 OBOL", stab:"0.519 BTC",
+    narr:"<b>Dip to $63k.</b> A is at CR 126%: a keeper repays $21,000, healing it into [132%, 137%]. Keeper nets ~10% of dd; the reserve takes 5%." },
+  { flow:"fulliq",    oracle:"MAX $52,000",    vault:"A · closed", pot:"+29,000 OBOL", stab:"0.539 BTC",
+    narr:"<b>Slide to $52k.</b> A is at CR ~111%: full liquidation. The keeper burns the full $29,000 debt, seizes the collateral; the ~$3,100 excess splits 2:1 keeper : reserve." },
+  { flow:"baddebt",   oracle:"MAX $40,000",    vault:"D · closed", pot:"+20,000 OBOL", stab:"0.439 BTC",
+    narr:"<b>Crash to $40k.</b> Vault D ($20,000 debt) is at CR 84%. The issuer attests; the reserve pays min(shortfall + bounty, 20% cap) = $4,000 (0.100 BTC). The vault closes." },
+  { flow:"poke",      oracle:"tick $40,000",   vault:"-", pot:"·", stab:"0.439 BTC",
+    narr:"<b>$40k.</b> A keeper pokes the issuer's global mint anchor to the fresh tick - no value moves, the stale-mint window closes." },
+  { flow:"redeem",    oracle:"MAX $40,000",    vault:"E · debt -$10,000", pot:"+10,000 OBOL", stab:"0.440 BTC",
+    narr:"<b>$40k.</b> A holder redeems $10,000 OBOL against vault E at min(par, backing_k) - 0.5%, receiving ~$9,950 of collateral. The peg floor holds." }
+];
+const STEP_MS = 5600;
+
+const stage = document.getElementById('stage');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip');
+const fcap = document.getElementById('flowcap');
+
+let lcTimer = null, lcIdx = 0, lcPlaying = false;
+
+function applyFlow(key) {
+  edges.forEach(e => e.classList.remove('lit'));
+  elbls.forEach(l => l.classList.remove('lit'));
+  nodes.forEach(n => n.classList.remove('lit'));
+  if (key === 'all') { stage.classList.remove('flowing','struct'); fcap.classList.remove('show','struct'); return; }
+  const f = FLOWS[key];
+  stage.classList.add('flowing');
+  stage.classList.toggle('struct', !!f.struct);
+  fcap.classList.toggle('struct', !!f.struct);
+  f.edges.forEach(id => document.getElementById(id)?.classList.add('lit'));
+  elbls.forEach(l => { if (f.edges.includes(l.dataset.e)) l.classList.add('lit'); });
+  f.nodes.forEach(k => document.querySelector(`.node[data-k="${k}"]`)?.classList.add('lit'));
+  document.getElementById('f-name').textContent = f.name;
+  document.getElementById('f-steps').innerHTML = f.steps.map(s => `<li>${s}</li>`).join('');
+  fcap.classList.add('show');
+}
+
+function stopLifecycle() {
+  if (lcTimer) { clearInterval(lcTimer); lcTimer = null; }
+  lcPlaying = false;
+  fcap.classList.remove('lc');
+  stage.classList.remove('lc');
+}
+
+function setFlow(key) {
+  stopLifecycle();
+  chips.forEach(c => c.classList.toggle('on', c.dataset.flow === key));
+  if (key === 'lifecycle') { startLifecycle(); return; }
+  applyFlow(key);
+}
+
+const dotsBox = document.getElementById('lc-dots');
+dotsBox.innerHTML = LIFECYCLE.map((s,i) => `<span data-i="${i}" title="${s.flow}"></span>`).join('');
+const dots = dotsBox.querySelectorAll('span');
+dots.forEach(d => d.addEventListener('click', () => { gotoStep(+d.dataset.i); pause(); }));
+
+function renderStep() {
+  const s = LIFECYCLE[lcIdx];
+  applyFlow(s.flow);
+  fcap.classList.add('lc');
+  stage.classList.add('lc');
+  document.getElementById('val-oracle').innerHTML = s.oracle;
+  document.getElementById('val-vault').innerHTML = s.vault;
+  document.getElementById('val-pot').innerHTML = s.pot;
+  document.getElementById('val-stab').innerHTML = s.stab;
+  document.getElementById('lc-narr').innerHTML = s.narr;
+  document.getElementById('lc-count').textContent = `${lcIdx + 1} / ${LIFECYCLE.length}`;
+  dots.forEach((d,i) => { d.classList.toggle('cur', i === lcIdx); d.classList.toggle('done', i < lcIdx); });
+}
+function gotoStep(i) { lcIdx = (i + LIFECYCLE.length) % LIFECYCLE.length; renderStep(); }
+function play() {
+  lcPlaying = true;
+  document.getElementById('lc-play').innerHTML = '&#10074;&#10074;';
+  if (lcTimer) clearInterval(lcTimer);
+  lcTimer = setInterval(() => {
+    if (lcIdx === LIFECYCLE.length - 1) { pause(); return; }
+    gotoStep(lcIdx + 1);
+  }, STEP_MS);
+}
+function pause() {
+  lcPlaying = false;
+  document.getElementById('lc-play').innerHTML = '&#9654;';
+  if (lcTimer) { clearInterval(lcTimer); lcTimer = null; }
+}
+function startLifecycle() {
+  lcIdx = (lcIdx >= LIFECYCLE.length - 1) ? 0 : lcIdx;
+  renderStep();
+  play();
+}
+document.getElementById('lc-prev').addEventListener('click', () => { gotoStep(lcIdx - 1); pause(); });
+document.getElementById('lc-next').addEventListener('click', () => { gotoStep(lcIdx + 1); pause(); });
+document.getElementById('lc-play').addEventListener('click', () => {
+  if (lcPlaying) { pause(); }
+  else { if (lcIdx >= LIFECYCLE.length - 1) lcIdx = 0; renderStep(); play(); }
+});
+
+chips.forEach(c => c.addEventListener('click', () => setFlow(c.dataset.flow)));
+
+nodes.forEach(n => n.addEventListener('click', () => {
+  nodes.forEach(x => x.classList.remove('sel'));
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+}));
+</script>
+</body>
+</html>

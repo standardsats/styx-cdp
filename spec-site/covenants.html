@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The covenants - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Γʹ</span> · reference</div>
+  <h1>The covenants</h1>
+  <p class="lede">Five Simplicity programs, about 1,200 lines in total, enforce the whole
+  protocol. This chapter is the reference: what each program guards, arm by arm, with the
+  load-bearing asserts cited by line. <b>Where this text and the source disagree, the source
+  wins.</b></p>
+</header>
+
+<p>All ratio math shares one helper. Collateral requirements are expressed as
+<code>coll_at_cr(debt_cents, price, k) = divide_64(debt_cents * k, price * 200)</code> with
+<code>k = CR_percent * 2,000,000</code> <a class="src" href="source.html#vault-L130">vault.simf:130-139</a>.
+The k-values used below: 150% = 300000000, 130% = 260000000, 137% = 274000000, 132% = 264000000,
+115% = 230000000, 100% = 200000000, 20% = 40000000, 5% = 10000000, 0.5% = 1000000.</p>
+
+<div class="why"><span class="lbl">Why the ratio is encoded this way</span>
+<p>A collateral ratio is collateral value over debt value, but the two sides arrive in different
+units - collateral in satoshis, debt in cents, price in USD per BTC - so an honest computation
+needs a division and several unit conversions (10^8 satoshis per BTC, cents, percent). Done
+directly in 64 bits it overflows, and Simplicity offers no way out: <code>multiply_64</code>
+returns a u128, but there is no 128-bit compare or split jet, so u128 is a dead end and every
+value must resolve in u64.</p>
+<p>The trick is to <b>never compute the ratio</b>. The covenant instead computes the collateral
+a given debt would require <i>at</i> a target ratio and compares that against the actual
+collateral. All the unit conversions collapse into two constants: the ratio rides in the
+numerator as <code>k = CR_percent * 2,000,000</code>, and the fixed <code>* 200</code> in the
+denominator carries the rest (2,000,000 / 200 = 10,000 folds the satoshi, cent, and percent
+scales together). So a gate is one comparison, <code>coll &gt;= coll_at_cr(debt, price, k)</code>.</p>
+<p>The scale 2,000,000 is the largest that keeps the worst-case product
+<code>debt_cents * k</code> inside u64: debt is asserted below 2^32 cents everywhere it is
+priced, the largest k in use is 300,000,000 (150%), and their product (about 1.3 x 10^18) sits
+safely under 2^64 (about 1.8 x 10^19). A larger scale would overflow - which is exactly why that
+<code>debt &lt; 2^32</code> assert exists. Encoding the ratio as one integer also lets a single
+helper serve every threshold: each op passes its own k, and because <code>divide_64</code>
+floors, the thresholds are written as bands so truncation always rounds toward the protocol.</p>
+</div>
+
+<h2 id="vault"><span class="sec">1</span>vault.simf - the position</h2>
+
+<p>Per-vault covenant, 471 lines. Holds L-BTC; state <code>(debt, owner, last_height)</code> in
+the 45-byte data leaf. Two guards run on <b>every</b> arm:</p>
+<ul>
+  <li>Self-binding: the witnessed state must reconstruct the UTXO's own address
+  <a class="src" href="source.html#vault-L244">vault.simf:244</a>, and <code>debt &lt; 2^32</code> cents
+  <a class="src" href="source.html#vault-L251">vault.simf:251</a> (conjured out-of-range vaults are excluded from every
+  arm).</li>
+  <li>One vault per transaction: <code>current_index() == 0</code>
+  <a class="src" href="source.html#vault-L258">vault.simf:258</a>. Two equal-debt vaults once aliased a single shared pot
+  output, extinguishing two debts for one repayment; the index pin closes the class.</li>
+</ul>
+
+<div class="tablewrap"><table>
+  <tr><th>Op</th><th>Who / quote</th><th>Load-bearing guards</th></tr>
+  <tr><td><b>CLOSE</b></td><td>owner sig</td>
+      <td>pot grows by the full <code>debt</code>; collateral freed, no successor
+      <a class="src" href="source.html#vault-L272">vault.simf:272-275</a></td></tr>
+  <tr><td><b>REPAY r</b></td><td>owner sig, no oracle</td>
+      <td><code>debt - r</code> without underflow; pot grows by <code>r</code>; successor
+      carries <code>last_height</code>; <b>collateral must not shrink</b>
+      (<code>le_64(coll, output_amount(0))</code>) - with no tick there is no health gate, so
+      there must be no withdrawal <a class="src" href="source.html#vault-L278">vault.simf:278-291</a></td></tr>
+  <tr><td><b>DRAW d</b></td><td>owner sig · MIN</td>
+      <td>strict freshness <code>lt_32(last_height, height)</code>; pot shrinks by exactly
+      <code>d</code>; successor at the tick height (ratchet advances); health
+      <code>coll &gt;= coll_at_cr(new_debt, lo, 150%)</code>
+      <a class="src" href="source.html#vault-L292">vault.simf:292-306</a></td></tr>
+  <tr><td><b>LIQUIDATE dd</b> (partial)</td><td>anyone · MAX</td>
+      <td>gate CR &lt; 130% <a class="src" href="source.html#vault-L332">vault.simf:332</a>; pot grows by
+      <code>dd</code>; residual healed into CR <b>[132%, 137%]</b>
+      <a class="src" href="source.html#vault-L346">vault.simf:346-347</a>; keeper extraction capped at
+      <b>1.15 x dd</b> <a class="src" href="source.html#vault-L353">vault.simf:353</a>; reserve receives 5% of dd
+      <a class="src" href="source.html#vault-L357">vault.simf:357</a>; ratchet carried, not advanced</td></tr>
+  <tr><td><b>FULL-LIQ</b></td><td>anyone · MAX</td>
+      <td>band CR in <b>[100%, 115%]</b> <a class="src" href="source.html#vault-L377">vault.simf:377-379</a>; pot grows
+      by the full <code>debt</code> (vault closes); reserve receives
+      <code>excess / 3</code> where <code>excess = coll - debt_sats</code>
+      <a class="src" href="source.html#vault-L389">vault.simf:389-391</a>; the keeper's seizure is unpinned and forced
+      by L-BTC conservation</td></tr>
+  <tr><td><b>BAD-DEBT</b></td><td>anyone · MAX</td>
+      <td>gate CR &lt; 100% <a class="src" href="source.html#vault-L402">vault.simf:402</a>; pot grows by the full
+      <code>debt</code>; everything else - shortfall sizing, reserve shrink, vault genuineness -
+      is authored by the issuer's ATTEST arm <a class="src" href="source.html#vault-L395">vault.simf:395-404</a></td></tr>
+  <tr><td><b>REDEEM x</b></td><td>any OBOL holder · MAX</td>
+      <td><code>0 &lt; x &lt;= debt</code>; pot grows by <code>x</code>; extraction capped at
+      <code>coll_at_cr(x, hi, min(par, backing_k))</code> - the peg floor
+      <a class="src" href="source.html#vault-L438">vault.simf:438-439</a>; reserve receives the 0.5% fee
+      <a class="src" href="source.html#vault-L442">vault.simf:442</a>; ratchet carried, not advanced (a self-redeem
+      cannot dodge liquidation)</td></tr>
+  <tr><td><b>REFRESH</b></td><td><b>anyone</b> · MAX</td>
+      <td>health gate CR &gt;= 130% <a class="src" href="source.html#vault-L458">vault.simf:458</a>; successor at the
+      tick height (ratchet advances); debt unchanged, collateral not reduced
+      <a class="src" href="source.html#vault-L444">vault.simf:444-461</a>. Permissionless by design
+      (<a href="security.html#trail">finding M-2</a>): any keeper can keep a dormant healthy vault
+      fresh</td></tr>
+</table></div>
+
+<p>The vault recognizes its siblings entirely by flat pins: the pot by <code>POT_SPK</code> +
+the OBOL asset id, the reserve by <code>STABILITY_SPK</code> + the POLICY asset. Its helper
+guards pin <b>both ends</b> of every pot move (<code>pot_grows_by</code>,
+<a class="src" href="source.html#vault-L159">vault.simf:159-175</a>; <code>pot_shrinks_by</code>,
+<a class="src" href="source.html#vault-L178">vault.simf:178-192</a>): input 1 and output 1 must both be the genuine pot,
+and the balance must change by exactly the stated delta. Without the input-side pin, the genuine
+pot could be left unspent while the delta was minted into a fresh UTXO at the same address from
+an arbitrary OBOL coin.</p>
+
+<h2 id="pot"><span class="sec">2</span>The pot - two leaves, one address</h2>
+
+<p>The pot holds the entire OBOL supply at one constant address with two Simplicity leaves. It
+is the compile root and reconstructs nobody, which is what lets every other covenant pin it
+flatly.</p>
+
+<h3>reserve_repay.simf - inflow (47 lines)</h3>
+<p>OBOL returning on repay, close, liquidate, redeem, and bad-debt. Guards: the pot sits at
+input 1 on every inflow path (<code>current_index() == 1</code>, an anti-aliasing pin
+<a class="src" href="source.html#reserve_repay-L33">reserve_repay.simf:33</a>); it recurses to output 1 at its own address in
+OBOL <a class="src" href="source.html#reserve_repay-L36">reserve_repay.simf:36-37</a>; and the balance is <b>grow-only</b>
+(<code>le_64(reserve_in, reserve_out)</code> <a class="src" href="source.html#reserve_repay-L46">reserve_repay.simf:46</a>).
+The exact inflow amount is pinned by the vault, not here.</p>
+
+<h3>pot_outflow.simf - outflow (44 lines)</h3>
+<p>OBOL leaving on OPEN and DRAW. The leaf checks exactly one thing: the issuer's identity token
+is co-spent at the input immediately after the pot
+(<code>ISSUER_TOKEN_ID == input_asset(current_index + 1)</code>
+<a class="src" href="source.html#pot_outflow-L37">pot_outflow.simf:37-39</a>), and the pot recurses to output 1. The amount
+is deliberately not pinned here - the issuer pins it - and the token gate is what makes that
+delegation safe.</p>
+
+<h2 id="issuer"><span class="sec">3</span>issuer.simf - the authority</h2>
+
+<p>529 lines. Holds the one-unit token; carries the global <code>last_mint_height</code> anchor
+in its 5-byte data leaf; the only covenant that reconstructs vault addresses. All four arms end
+in <code>recurse_token</code> (asset == token, amount == 1, successor at the advanced anchor)
+<a class="src" href="source.html#issuer-L215">issuer.simf:215-222</a>. Freshness on this covenant is <b>non-strict</b>,
+<code>le_32(last_mint_height, height)</code>: the global anchor must reject older ticks without
+serializing several legitimate mints that share one fresh tick
+<a class="src" href="source.html#issuer-L29">issuer.simf:29-33</a>.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Op</th><th>Quote</th><th>Load-bearing guards</th></tr>
+  <tr><td><b>OPEN</b></td><td>MIN</td>
+      <td><code>debt = principal</code>, <code>debt &lt; 2^32</code>; <code>principal &gt; 0</code>
+      (a zero-amount mint would free the token to satisfy someone else's gate)
+      <a class="src" href="source.html#issuer-L259">issuer.simf:259-263</a>; pot read at <code>current_index - 1</code>
+      and drained by exactly <code>principal</code> <a class="src" href="source.html#issuer-L269">issuer.simf:269-285</a>;
+      borrower gets exactly <code>principal</code> OBOL; the 0.5% borrow fee is paid in L-BTC
+      into the reserve, pinned end to end <a class="src" href="source.html#issuer-L295">issuer.simf:295-302</a>; the new
+      vault must sit at the reconstructed address for <code>(debt, owner, open_height)</code>
+      and hold collateral &gt;= 150% at the MIN quote
+      <a class="src" href="source.html#issuer-L307">issuer.simf:307-311</a></td></tr>
+  <tr><td><b>DRAW</b></td><td>none (delegated)</td>
+      <td>carries no tick: input 0 must be the genuine old vault and output 0 the successor for
+      <code>(new_debt, owner, draw_height)</code> - the vault's own DRAW arm already verified
+      the quorum and committed the height it checked, so the issuer inherits it by
+      reconstruction <a class="src" href="source.html#issuer-L325">issuer.simf:325-331</a>; <code>d &gt; 0</code>; pot
+      read at <code>current_index - 1</code>, drained by exactly <code>d</code>
+      <a class="src" href="source.html#issuer-L343">issuer.simf:343-360</a></td></tr>
+  <tr><td><b>POKE</b></td><td>any valid tick</td>
+      <td>permissionless anchor advance (the quorum is verified but neither quantile is used),
+      no value moves; pinned to
+      <code>current_index() == 0</code> so a poke can never be smuggled into another
+      transaction to satisfy a token gate <a class="src" href="source.html#issuer-L372">issuer.simf:372-383</a></td></tr>
+  <tr><td><b>ATTEST</b></td><td>MAX</td>
+      <td>pinned to <code>current_index() == 4</code> <a class="src" href="source.html#issuer-L408">issuer.simf:408</a>;
+      input 0 must be the genuine vault reconstructed from <code>(debt, owner, lh)</code> - the
+      genuineness check the reserve itself cannot do <a class="src" href="source.html#issuer-L415">issuer.simf:415</a>;
+      CR &lt; 100% at MAX; the reserve pays
+      <code>min(shortfall + 5% bounty, 20% of debt, reserve balance)</code>
+      <a class="src" href="source.html#issuer-L451">issuer.simf:451-474</a>; output 0 (the keeper's seizure) pinned to
+      exactly <code>coll + reserve_pay</code>; the pot must grow by exactly the full
+      <code>debt</code> - the vault is forced to close, no recursing branch can match
+      <a class="src" href="source.html#issuer-L495">issuer.simf:495-508</a>; the reserve shrink is pinned to exactly
+      <code>reserve_pay</code> <a class="src" href="source.html#issuer-L514">issuer.simf:514-518</a>; the token advance
+      doubles as a poke</td></tr>
+</table></div>
+
+<h2 id="stability"><span class="sec">4</span>stability.simf - the reserve</h2>
+
+<p>118 lines, one leaf, <b>no data leaf</b>: a constant address, so peers pin it flatly. Its own
+recency need rides on the issuer's anchor instead of a per-reserve ratchet - an earlier mutable
+(ratcheted) reserve address opened a sybil-reserve fee diversion and was simplified away
+<a class="src" href="source.html#stability-L14">stability.simf:14-25</a>. Every path asserts its own input is POLICY
+(anyone can send junk assets to a public address) <a class="src" href="source.html#stability-L62">stability.simf:62-63</a>.</p>
+
+<ul>
+  <li><b>ACCUMULATE</b>: pinned to <code>current_index() == 3</code>; recurses to output 3 at
+  its own address; balance grow-only. The exact fee amount is pinned by the vault or issuer arm
+  in the same transaction <a class="src" href="source.html#stability-L69">stability.simf:69-77</a>.</li>
+  <li><b>BAD-DEBT</b>: pinned to <code>current_index() == 3</code>; requires the issuer token at
+  input 4 <a class="src" href="source.html#stability-L98">stability.simf:98</a>; requires the pot to <b>strictly grow</b>
+  (<code>lt_64</code>, input 1 to output 1, both pinned to <code>POT_SPK</code> + OBOL)
+  <a class="src" href="source.html#stability-L100">stability.simf:100-109</a>; recurses to output 2 and only self-defends
+  <b>downward</b> (<code>output &lt;= balance</code>) - the exact shrink is authored by the
+  issuer's ATTEST <a class="src" href="source.html#stability-L111">stability.simf:111-116</a>.</li>
+</ul>
+
+<div class="why"><span class="lbl">Why strict pot growth forces ATTEST</span>
+<p>The token gate alone says "an issuer arm is present", not which one. POKE is pinned to input
+0, so it cannot sit at input 4. OPEN and DRAW spend the pot through the outflow leaf, which
+shrinks it. Only ATTEST grows the pot. Requiring strict growth therefore forces the one arm that
+actually authors and bounds the reserve shrink - an independent structural invariant, not an
+index-adjacency argument.</p></div>
+
+<h2 id="witness"><span class="sec">5</span>The OP witness sums</h2>
+
+<p>Each covenant dispatches through a single nested <code>Either</code> witness. These shapes
+are consensus-critical for builders: a wrong nesting does not fail loudly, it prunes to a
+different arm. In all of the following,
+<code>tick = (height: u32, (backing_k: u32, [Either&lt;(), (price: u32, sig)&gt;; 5]))</code> -
+five quote slots, exactly three of which are <code>Right((price, sig))</code>.</p>
+
+<h3>Vault <a class="src" href="source.html#vault-L263">vault.simf:263-266</a></h3>
+<pre><code>OP = Either&lt;
+  (owner_sig, Either&lt;                     <span class="c">// Left           = owner ops</span>
+      (),                                 <span class="c">//   L(sig, Left)         CLOSE</span>
+      Either&lt;u64,                         <span class="c">//   L(sig, R(Left r))    REPAY r</span>
+             (u64, tick)&gt;&gt;),              <span class="c">//   L(sig, R(R(d,tick))) DRAW d</span>
+  Either&lt;(u64, tick),                     <span class="c">// R(Left)              LIQUIDATE (dd, tick)</span>
+    Either&lt;tick,                          <span class="c">// R(R(Left))           FULL-LIQ</span>
+      Either&lt;tick,                        <span class="c">// R(R(R(Left)))        BAD-DEBT</span>
+        Either&lt;(u64, tick),               <span class="c">// R(R(R(R(Left))))     REDEEM (x, tick)</span>
+               tick&gt;&gt;&gt;&gt;&gt;                  <span class="c">// R(R(R(R(Right))))    REFRESH</span></code></pre>
+
+<h3>Issuer <a class="src" href="source.html#issuer-L232">issuer.simf:232-238</a></h3>
+<pre><code>OP = Either&lt;
+  (u64, (u256, tick)),                    <span class="c">// Left                 OPEN (principal, owner, tick)</span>
+  Either&lt;
+    (u64, (u256, (u32, (u64, u32)))),     <span class="c">// R(Left)              DRAW (old_debt, owner,</span>
+                                          <span class="c">//                        old_lh, new_debt, draw_height)</span>
+    Either&lt;tick,                          <span class="c">// R(R(Left))           POKE</span>
+           (u64, (u256, (u32, tick)))&gt;&gt;&gt;  <span class="c">// R(R(Right))          ATTEST (debt, owner, lh, tick)</span></code></pre>
+
+<h3>Stability <a class="src" href="source.html#stability-L67">stability.simf:67</a></h3>
+<pre><code>OP = Either&lt;(), ()&gt;                       <span class="c">// Left ACCUMULATE · Right BAD-DEBT</span></code></pre>
+
+<p class="fine">The pot's two leaves take no witness values at all; the operation is selected by
+the taproot script path. A conforming SDK must carry a total encoder per sum and prove each
+variant prunes to the intended arm (see <a href="building.html#crux">chapter Ιʹ</a>).</p>
+
+<h2 id="hardening"><span class="sec">6</span>Local pins added at freeze</h2>
+
+<p>Three defense-in-depth pins were added in the final hardening round. None fixed a live
+exploit; each removes a reliance on a sibling covenant that an immutable artifact should not
+carry:</p>
+
+<ul>
+  <li>ATTEST pins its own position, <code>current_index() == 4</code> - previously implied by
+  the reserve's gate, now local <a class="src" href="source.html#issuer-L402">issuer.simf:402-408</a>.</li>
+  <li>ATTEST pins <code>input_asset(1) == OBOL</code> locally before reading the pot amount -
+  previously guaranteed by the co-spent reserve arm <a class="src" href="source.html#issuer-L496">issuer.simf:496-501</a>.</li>
+  <li><code>pot_grows_by</code> pins the input side to <code>POT_SPK</code>, symmetric with
+  <code>pot_shrinks_by</code> <a class="src" href="source.html#vault-L160">vault.simf:160-166</a>.</li>
+</ul>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

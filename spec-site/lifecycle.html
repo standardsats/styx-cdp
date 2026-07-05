@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transaction lifecycle - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Δʹ</span> · the operating model</div>
+  <h1>Transaction lifecycle</h1>
+  <p class="lede">Ten operations cover a vault's whole life. This chapter maps them onto the
+  collateral-ratio ladder and gives the exact input / output layout of each transaction - the
+  layouts are consensus-relevant, because covenants read siblings at fixed and relative
+  indices.</p>
+</header>
+
+<h2 id="ladder"><span class="sec">1</span>The op ladder</h2>
+
+<p>Which operation applies depends on the vault's collateral ratio (CR), always evaluated at
+the MAX quote of a fresh oracle tick unless noted. Descending the ladder:</p>
+
+<div class="ladder">
+  <div class="rung"><div class="cr">CR &gt;= 130%</div>
+    <div class="op">REFRESH<small>any keeper</small></div>
+    <div class="fx">advance the vault's freshness ratchet; debt and collateral unchanged. The
+    anti-replay defense for dormant positions.</div></div>
+  <div class="rung"><div class="cr">115% &lt; CR &lt;= 130%</div>
+    <div class="op">LIQUIDATE<small>any keeper · partial</small></div>
+    <div class="fx">keeper repays <code>dd</code>, heals the residual into CR [132%, 137%],
+    extracts at most 1.15 x dd; the 15% penalty splits keeper 10% / reserve 5% of dd.</div></div>
+  <div class="rung"><div class="cr">100% &lt;= CR &lt;= 115%</div>
+    <div class="op">FULL-LIQ<small>any keeper</small></div>
+    <div class="fx">keeper repays the full debt and seizes the collateral; the vault closes;
+    the excess above par splits 2:1 keeper : reserve.</div></div>
+  <div class="rung"><div class="cr">CR &lt; 100%</div>
+    <div class="op">BAD-DEBT<small>any keeper · issuer-attested</small></div>
+    <div class="fx">keeper repays the full debt; the reserve covers
+    <code>min(shortfall + 5% bounty, 20% of debt, balance)</code>; the vault closes even if the
+    reserve is empty.</div></div>
+  <div class="rung"><div class="cr">any CR (owner)</div>
+    <div class="op">CLOSE / REPAY<small>owner signature</small></div>
+    <div class="fx">repay the full debt and free the collateral, or lower the debt. Both only
+    improve health, so neither is gated - an owner can always close or repay a vault at any CR,
+    including underwater, which competes with liquidation.</div></div>
+  <div class="rung"><div class="cr">post-op CR &gt;= 150% (owner)</div>
+    <div class="op">DRAW<small>owner signature · MIN</small></div>
+    <div class="fx">borrow more. The covenant re-proves 150% at the MIN quote on the resulting
+    debt, so a vault below 150% cannot draw at all - it is unavailable well before the 130%
+    liquidation band.</div></div>
+  <div class="rung"><div class="cr">any</div>
+    <div class="op">REDEEM<small>any OBOL holder</small></div>
+    <div class="fx">swap x OBOL for collateral valued at <code>min(par, backing_k)</code> minus
+    the 0.5% fee - the peg floor.</div></div>
+  <div class="rung"><div class="cr">n/a</div>
+    <div class="op">OPEN<small>borrower + issuer</small></div>
+    <div class="fx">mint <code>principal</code> OBOL against a new vault at &gt;= 150% (MIN
+    quote); a 0.5% L-BTC fee goes to the reserve; <code>debt = principal</code>.</div></div>
+  <div class="rung"><div class="cr">n/a</div>
+    <div class="op">POKE<small>anyone</small></div>
+    <div class="fx">advance the issuer's global mint anchor toward the tip; no value moves.</div></div>
+</div>
+
+<p class="fine">Band sources: trigger and REFRESH gate <a class="src" href="source.html#vault-L332">vault.simf:332,458</a>,
+heal band <a class="src" href="source.html#vault-L346">vault.simf:346-347</a>, extraction cap
+<a class="src" href="source.html#vault-L353">vault.simf:353</a>, full-liq band <a class="src" href="source.html#vault-L377">vault.simf:377-379</a>,
+bad-debt gate <a class="src" href="source.html#vault-L402">vault.simf:402</a>, open/draw health
+<a class="src" href="source.html#issuer-L309">issuer.simf:309-311</a>, <a class="src" href="source.html#vault-L305">vault.simf:305</a>.</p>
+
+<h2 id="layouts"><span class="sec">2</span>Transaction layouts</h2>
+
+<p>Conventions that hold across all layouts: the vault, when present, is always input 0 (its own
+index pin); the pot moves between input 1 and output 1; the reserve occupies slot 3 when
+present; every oracle-carrying transaction sets <code>nLockTime</code> to the tick height. The
+layouts below are normative: each one was validated on-node against the frozen covenants, and
+a conforming builder must produce exactly these shapes.</p>
+
+<h3 id="open">OPEN</h3>
+<pre><code><span class="k">in </span> 0 pot (OBOL)          1 issuer (token)      2 collateral (L-BTC)  3 reserve (L-BTC)
+<span class="k">out</span> 0 new vault (coll)    1 pot - principal     2 borrower (principal OBOL)
+    3 reserve + 0.5% fee  4 issuer successor    5 network fee</code></pre>
+<p>The issuer's OPEN arm reads the pot at <code>current_index - 1</code> (input 0, since the
+issuer sits at input 1), reconstructs the new vault at output 0, and pins the fee into the
+reserve. The pot spends through its outflow leaf, gated on the token at input 1.</p>
+
+<h3 id="draw">DRAW</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 issuer (token)
+<span class="k">out</span> 0 vault successor     1 pot - d             2 borrower (d OBOL)
+    3 issuer successor    4 network fee</code></pre>
+<p>The vault's DRAW arm verifies the quorum and the 150% MIN-quote health; the issuer inherits
+the height by reconstructing the same successor address at output 0 and pins the pot delta.</p>
+
+<h3 id="repay">REPAY / CLOSE</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 payer OBOL          [3 fee coin - REPAY]
+<span class="k">out</span> 0 successor (REPAY, collateral intact) <span class="c">or</span> freed collateral (CLOSE)
+    1 pot + r <span class="c">or</span> pot + debt                  [payer OBOL change]  [fee-coin change]  fee</code></pre>
+<p>No oracle. REPAY funds the network fee from a separate coin because the covenant forbids the
+collateral from shrinking; CLOSE pays it from the freed collateral.</p>
+
+<h3 id="refresh">REFRESH</h3>
+<pre><code><span class="k">in </span> 0 vault               1 fee coin
+<span class="k">out</span> 0 vault successor (same debt and collateral, new last_height)   1 change   2 fee</code></pre>
+
+<h3 id="liquidate">LIQUIDATE (partial)</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 keeper OBOL         3 reserve (L-BTC)
+<span class="k">out</span> 0 residual vault      1 pot + dd            2 keeper collateral
+    3 reserve + 5% of dd  [4 keeper OBOL change]                      fee</code></pre>
+
+<h3 id="fulliq">FULL-LIQ</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 keeper OBOL         3 reserve (L-BTC)
+<span class="k">out</span> 0 keeper collateral   1 pot + debt          2 keeper OBOL change
+    3 reserve + excess/3  4 fee</code></pre>
+<p>The keeper's OBOL change output is deliberately always present: it is the anchor the keeper's
+own SIGHASH_ALL signature commits to, binding the otherwise-unpinned payout
+(<a href="economics.html#E-5">finding E-5</a>, see <a href="building.html#invariants">chapter Ιʹ</a>).</p>
+
+<h3 id="baddebt">BAD-DEBT (with ATTEST)</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 keeper OBOL
+    3 reserve (L-BTC)     4 issuer (token)      5 fee coin
+<span class="k">out</span> 0 keeper: coll + reserve_pay              1 pot + debt
+    2 reserve - reserve_pay                    3 issuer successor
+    [4 keeper OBOL change]  [fee-coin change]  fee</code></pre>
+<p>Three covenants and the issuer arm run at once: the vault's BAD-DEBT branch proves
+CR &lt; 100%, the reserve's arm gates on the token at input 4 and strict pot growth, and the
+issuer's ATTEST reconstructs the genuine vault at input 0 and authors every amount.</p>
+
+<h3 id="redeem">REDEEM</h3>
+<pre><code><span class="k">in </span> 0 vault               1 pot (OBOL)          2 redeemer OBOL       3 reserve (L-BTC)
+<span class="k">out</span> 0 vault successor     1 pot + x             2 redeemer collateral
+    3 reserve + 0.5% fee  [4 redeemer OBOL change]                    fee</code></pre>
+
+<h3 id="poke">POKE</h3>
+<pre><code><span class="k">in </span> 0 issuer (token)      1 fee coin
+<span class="k">out</span> 0 issuer successor    1 change              2 fee</code></pre>
+<p>The POKE arm is pinned to <code>current_index() == 0</code>, so an issuer poke can never be
+embedded in another transaction to satisfy a token gate while pinning nothing.</p>
+
+<h2 id="demo"><span class="sec">3</span>The reference run</h2>
+
+<p>The reference implementation behind this spec exercises the full ladder in one on-node run
+against a regtest Simplicity elementsd: OPEN (fee to reserve), REPAY, DRAW, REFRESH, CLOSE, a
+price dip, partial LIQUIDATE, FULL-LIQ, a crash, BAD-DEBT, POKE, and REDEEM at the backing
+floor - plus 27 negative transactions, each rejected by a single identified covenant gate.
+Every accept and reject in this spec corresponds to a real node verdict from that run.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

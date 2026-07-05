@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building on STYX - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">Ιʹ</span> · builders, keepers, roles</div>
+  <h1>Building on STYX</h1>
+  <p class="lede">The covenant is frozen; the software around it is not. This chapter is the contract
+  between the frozen v1 spec and the testnet SDK: what a transaction builder must guarantee, which
+  duties a keeper owes the system, and where the two genuinely hard problems live.</p>
+</header>
+
+<h2 id="status"><span class="sec">1</span>Where things stand</h2>
+
+<p>Everything in this spec is implemented and validated on-node by a working reference
+implementation: builders for every operation, the witness-sum encoders, address and CMR
+derivation, and the collateral-ratio math. The public testnet version is built iteratively from
+that reference, against this spec - explicitly <b>not a rewrite</b>, but decomposition, typing,
+and test coverage of what already works.</p>
+
+<p>Two decisions are locked:</p>
+<ul>
+  <li><b>Transaction format: PSET</b> (Partially Signed Elements Transaction). The protocol has
+  multiple signers per transaction - the oracle quorum, the vault owner, the keeper - and PSET is what
+  wallets interoperate on. Builders emit PSET, not raw transactions; covenant witnesses (the script
+  path plus the pruned Simplicity program) and the Schnorr signatures slot into PSET input fields.</li>
+  <li><b>Freeze before building.</b> Builders encode exact witness structures, transaction layouts,
+  index conventions, and CMR-derived addresses. If the <code>.simf</code> source moved under them,
+  every builder and every golden fixture would churn. The economic pass is complete, the golden-CMR
+  gate is in place, and builder work starts from the frozen source.</li>
+</ul>
+
+<h2 id="layers"><span class="sec">2</span>The layered SDK</h2>
+
+<p>The reference implementation fuses construction with node I/O: each operation builds, sends,
+and mines in one method, and all coverage is one end-to-end run. The testnet crate splits this
+into six layers so that most of the test weight becomes fast and pure:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Layer</th><th>Contents</th><th>Tested by</th></tr>
+  <tr><td><b>1 · Pure primitives</b></td>
+      <td>CR math (<code>coll_at_cr</code>, <code>required_sats</code>, exact truncation direction),
+      leaf / scriptPubKey / CMR / control-block derivation, witness-sum encoders</td>
+      <td>unit tests, milliseconds, no node</td></tr>
+  <tr><td><b>2 · Covenant artifacts</b></td>
+      <td>compile + prune the five covenants, record CMRs / addresses / params;
+      <code>deploy_preflight</code> lives here</td>
+      <td>golden-CMR fixtures</td></tr>
+  <tr><td><b>3 · PSET builders</b></td>
+      <td>pure functions <code>(state + intent) -&gt; PSET</code>, no send or mine inside; one builder
+      per operation</td>
+      <td>prune-level accept / reject</td></tr>
+  <tr><td><b>4 · Node adapter</b></td>
+      <td>funding, broadcast, confirmation, UTXO tracking</td>
+      <td>integration tests on regtest</td></tr>
+  <tr><td><b>5 · Domain types</b></td>
+      <td><code>Vault {debt, owner, last_height, outpoint, coll}</code>, <code>Issuer</code>,
+      <code>Pot</code>, <code>Reserve</code>, <code>OracleTick {height, backing_k, quotes}</code>,
+      <code>Config</code></td>
+      <td>property tests</td></tr>
+  <tr><td><b>6 · Roles</b></td>
+      <td>oracle signer, keeper / watchtower, borrower wallet</td>
+      <td>end-to-end scenarios</td></tr>
+</table></div>
+
+<h3>The test pyramid</h3>
+<p>The reference implementation's pyramid is inverted: 100% of its coverage is top-tier
+on-node end-to-end. The SDK target is the usual shape:</p>
+<ul>
+  <li><b>Unit</b> (pure, milliseconds): math, encoding, address derivation.</li>
+  <li><b>Prune-level</b> (no node): build a transaction, run <code>satisfy_with_env</code>, assert
+  accept or reject. This layer gives the same verdict the node does, and it is where the
+  single-cause negative tests live - the discipline inherited from the audits.</li>
+  <li><b>On-node end-to-end</b> (regtest elementsd): the reference lifecycle run survives as the
+  top smoke and acceptance suite.</li>
+</ul>
+
+<h2 id="crux"><span class="sec">3</span>The two crux items</h2>
+
+<h3>The nested-sum witness encoder</h3>
+<p>Every covenant dispatches its operations through one nested <code>Either</code> sum (the exact
+shapes are in <a href="covenants.html#witness">chapter Γʹ</a>). This is the single most error-prone
+surface in the SDK: one wrong nesting level does not merely fail - it can prune the program to a
+<b>different arm</b> and run the wrong operation's guard. The plan: a type-safe enum per covenant
+that mirrors the covenant's sum exactly, a total encoding function, and a test per variant proving
+it prunes to the intended arm and no other.</p>
+
+<h3>CR-math parity</h3>
+<p>The collateral-ratio helper <code>coll_at_cr</code> exists twice: once in Rust (the builder side)
+and once in SimplicityHL (the covenant side). Both must truncate identically - floor division, same
+direction - or a builder will emit an amount exactly one satoshi off a <code>&lt;=</code> gate and
+the covenant will reject a transaction the builder considered valid. The plan: property tests that
+for random <code>(debt, price, k)</code> the Rust value equals the covenant's, and that every
+builder output passes the on-node assert.</p>
+
+<h2 id="invariants"><span class="sec">4</span>Builder and keeper invariants</h2>
+
+<p>The covenant leaves a short list of things deliberately on trust; they are cheap to enforce
+off-chain and expensive or impossible to enforce on-chain. The SDK must treat each of these as a
+hard rule, not a convention:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Invariant</th><th>Rule</th><th>Why</th></tr>
+  <tr><td><b>Single pot, single reserve</b></td>
+      <td>Never fragment the pot or the reserve; a builder must refuse to build if it sees more than
+      one UTXO at either address.</td>
+      <td>The covenant cannot consolidate fragments; value in a second UTXO is operationally
+      stranded until spent back in one piece.</td></tr>
+  <tr><td><b>Keeper payout binding</b></td>
+      <td>Every permissionless operation (partial liquidation, full liquidation, bad debt, redeem)
+      carries a mandatory keeper funding input; the builder must sign it <b>SIGHASH_ALL</b> - never
+      an anyone-can-pay or output-masking mode.</td>
+      <td>The keeper's payout output is not pinned by the covenant. SIGHASH_ALL makes the keeper's
+      own signature commit to the payout destination, so no mempool observer can redirect it
+      (<a href="economics.html#E-5">finding E-5</a>). REFRESH has no payout and needs no binding.</td></tr>
+  <tr><td><b>Explicit values</b></td>
+      <td>Protocol outputs must be explicit (unblinded); only change and borrower-facing outputs may
+      blind.</td>
+      <td>The covenant's explicit-read jets fail on blinded values; a blinded protocol output is
+      unspendable by the covenant path.</td></tr>
+  <tr><td><b>Per-op fee sourcing</b></td>
+      <td>REPAY and REFRESH pay the network fee from a separate coin; CLOSE pays it from the freed
+      collateral.</td>
+      <td>REPAY and REFRESH forbid the collateral from shrinking, so the fee cannot come out of the
+      vault.</td></tr>
+  <tr><td><b>Issuer contention</b></td>
+      <td>Retry on conflict; sequence mempool-aware.</td>
+      <td>Every mint and every bad-debt attestation serializes through the one issuer UTXO;
+      concurrent users race for it.</td></tr>
+  <tr><td><b>Keeper liveness</b></td>
+      <td>POKE the issuer anchor toward the tip and REFRESH dormant healthy vaults on a schedule,
+      not best-effort.</td>
+      <td>The freshness ratchets are the anti-replay defense; they only protect vaults that someone
+      keeps fresh (see <a href="oracle.html">chapter Εʹ</a>).</td></tr>
+  <tr><td><b>backing_k sourcing</b></td>
+      <td>The oracle role needs a defined procedure to compute and co-sign the global backing
+      ratio.</td>
+      <td><code>backing_k</code> is off-chain data trusted to the same 3-of-5 quorum; only the
+      REDEEM floor reads it.</td></tr>
+</table></div>
+
+<h2 id="trust-builders"><span class="sec">5</span>Do builders have to be trusted?</h2>
+
+<p>No. The authority is the covenant, not the builder, so <b>protocol safety does not depend on
+any builder following these rules.</b> A malicious builder cannot mint unbacked OBOL, steal
+collateral, drain the reserve, or brick a singleton - those are covenant-enforced whatever the
+builder does. The rules above split into two kinds, and neither is a lever a griefer can pull
+against the protocol.</p>
+
+<h3>Validity and self-interest rules - the incentive is intrinsic</h3>
+<p>Breaking one of these invalidates the builder's <b>own</b> transaction or costs the builder
+its <b>own</b> money. There is nothing to police, because the covenant (or the node) rejects a
+malformed transaction and a griefer who breaks these is just a griefer who cannot transact.</p>
+<ul>
+  <li><b>Explicit values</b> - a blinded protocol output fails the covenant's explicit-read jet:
+  the transaction is rejected. Self-inflicted.</li>
+  <li><b>Per-op fee sourcing</b> - paying a REPAY or REFRESH fee out of collateral trips the
+  "collateral must not shrink" assert: rejected. Self-inflicted.</li>
+  <li><b>Keeper payout binding</b> - a loosely-signed keeper input lets a mempool observer
+  redirect the payout, but the liquidation still executes correctly (the vault heals or closes,
+  the pot and reserve stay right). Only the careless keeper loses; the protocol's invariants are
+  untouched.</li>
+  <li><b>Single pot / reserve</b> - a protocol operation cannot fragment the pot at all
+  (<code>pot_grows_by</code> pins both ends to the genuine pot). A fragment appears only if
+  someone donates a UTXO to the address outside an operation, which strands their own funds; the
+  canonical singleton is untouched and honest indexers ignore the decoy (the decoy-pot theft
+  vector is closed in the covenant by the <code>current_index - 1</code> read).</li>
+  <li><b>Issuer contention</b> - not retrying just means your transaction fails when someone else
+  spends the singleton first. A liveness annoyance to yourself.</li>
+</ul>
+
+<h3>Liveness duties - permissionless, so not weaponizable</h3>
+<p>POKE and REFRESH are the only rules that protect the <b>system</b> rather than the builder,
+but they are permissionless: a griefer cannot <b>prevent</b> them, only decline to perform them.
+A single honest keeper closes the gap, and every mint already advances the issuer anchor. The
+exposed party - the owner of an un-refreshed dormant vault - carries its own liveness risk, and
+anyone may refresh it on their behalf. So the harm here materializes only under
+<b>ecosystem-wide neglect</b>, not adversarial action; it is the accepted residual of
+<a href="economics.html#E-9">E-9</a> and <a href="security.html#trail">M-2</a>, not an attack.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>A griefer breaking the rules can</th><th>and cannot</th></tr>
+  <tr><td>contend for a singleton's outpoint (slowdown, <a href="#contention">section 9</a>)</td>
+      <td>mint unbacked OBOL</td></tr>
+  <tr><td>donate decoy fragments (burning their own funds)</td>
+      <td>steal collateral</td></tr>
+  <tr><td>broadcast invalid transactions (the node rejects them, they pay the fee)</td>
+      <td>drain the reserve</td></tr>
+  <tr><td>decline to POKE or REFRESH (any honest actor closes it)</td>
+      <td>burn or brick a singleton</td></tr>
+</table></div>
+
+<p>In short, the builder rules exist so that an <b>honest</b> client transacts correctly and
+does not lose its own value. They are not load-bearing for safety - that is what moving every
+authority into the covenant buys.</p>
+
+<h2 id="roles"><span class="sec">6</span>The roles</h2>
+
+<dl class="gloss">
+  <dt>Oracle signer</dt>
+  <dd>One of the five genesis keys. Signs <code>sha256(height || price || backing_k)</code> ticks on
+  a schedule against a tight, aggregated price source. Must also agree the <code>backing_k</code>
+  figure with the rest of the quorum.</dd>
+  <dt>Keeper / watchtower</dt>
+  <dd>Permissionless and profit-motivated for liquidations and redemptions; duty-driven for
+  liveness (POKE, REFRESH). Funds every permissionless operation from its own key, signed
+  SIGHASH_ALL. Watches the mempool for issuer contention.</dd>
+  <dt>Borrower wallet</dt>
+  <dd>Builds OPEN / DRAW / REPAY / CLOSE PSETs, tracks the owner's vault state (debt, collateral,
+  <code>last_height</code>), and keeps the vault's data leaf reconstructible from the wallet's own
+  records.</dd>
+</dl>
+
+<h2 id="recovery"><span class="sec">7</span>Wallet recovery from seed</h2>
+
+<p>A vault address is not a function of the owner's key alone: it commits the dynamic state
+<code>(debt, owner, last_height)</code>, which a freshly restored wallet does not know. A
+standard restore flow - derive addresses from the seed, subscribe to them - therefore finds
+<b>nothing</b>. This is a structural property of state-in-address, and the recovery procedure
+below is the required substitute, not an optional convenience.</p>
+
+<p>The data leaf of an unspent vault is never visible on-chain (a taproot leaf is revealed only
+on spend), but the protocol never needs it to be: every state value is exposed as Simplicity
+witness data in the transaction that <b>created</b> that state. OPEN carries
+<code>(principal, owner, tick)</code> in the issuer's witness; the issuer's DRAW arm carries the
+full <code>(old_debt, owner, old_last_height, new_debt, draw_height)</code>; and every vault
+spend witnesses <code>DEBT</code>, <code>OWNER</code>, and <code>LAST_HEIGHT</code> outright. An
+unspent vault's state is always reconstructible from its parent transaction's witnesses.</p>
+
+<p>Recovery is a deterministic walk over the protocol's singleton chains:</p>
+
+<ol>
+  <li><b>Walk the issuer chain.</b> The issuer is a single UTXO and every OPEN, DRAW, POKE, and
+  ATTEST spends it, so its spend chain is linear from genesis - one transaction per hop,
+  enumerable with Esplora-style outspend queries, no full node required.</li>
+  <li><b>Match the owner field.</b> In each OPEN and DRAW witness, compare <code>owner</code>
+  against the wallet's derived keys. A match yields the vault, its creation state, and - since
+  the address is a pure function of the state - its exact address and outpoint.</li>
+  <li><b>Follow the vault's outpoint.</b> From there, each spend of the vault reveals the
+  witness, from which the successor state and successor address are computed. This walk also
+  captures every operation the owner did not sign: a keeper's REFRESH (the one operation that
+  touches no singleton - but it spends a known outpoint), a partial liquidation, a
+  redemption against the vault.</li>
+</ol>
+
+<p>The walk recovers both the full history and the exact current state, including the
+<code>last_height</code> needed to build the next operation. Two conventions make it work and
+belong in the SDK:</p>
+
+<ul>
+  <li><b>A fixed derivation path for owner keys</b>, so a restored wallet derives the same
+  x-only keys it once put into vault data leaves - without it, step 2 has nothing to match.</li>
+  <li><b>A fresh key per vault with a gap-limit-style derivation window</b>, mirroring ordinary
+  wallet scanning discipline.</li>
+</ul>
+
+<div class="note"><span class="lbl">Privacy consequence</span>
+<p>The same mechanism that makes recovery possible makes ownership public: the owner key
+appears in plaintext witness data on every vault operation, so an indexer maps every vault to
+its owner key, and key reuse links all of an owner's vaults to each other. This is consistent
+with the protocol's explicit-amounts stance, and per-vault keys are the available
+mitigation - they hide the linkage between vaults, not the vault-to-key mapping itself.</p></div>
+
+<h2 id="indexer"><span class="sec">8</span>The indexer</h2>
+
+<p>The recovery walk generalizes: a protocol-aware indexer, reading nothing but the chain,
+reconstructs the entire vault system. It is the natural shared infrastructure behind all three
+roles - the borrower wallet queries it for recovery and for the state needed to build the next
+PSET, the keeper watchtower queries it for liquidation candidates, and the oracle signers
+query it for the inputs to <code>backing_k</code>.</p>
+
+<h3>Available from the chain alone</h3>
+
+<div class="tablewrap"><table>
+  <tr><th>Data</th><th>How</th></tr>
+  <tr><td>the vault census (every genuine vault, live and closed)</td>
+      <td>walk the issuer singleton's linear spend chain; every OPEN and DRAW passes through
+      it</td></tr>
+  <tr><td>per-vault state <code>(debt, owner, last_height)</code>, address, outpoint</td>
+      <td>witness data: OPEN and DRAW expose the successor state in the issuer's witness, and
+      every vault spend witnesses the full current state; successor states are pure functions
+      of witness values</td></tr>
+  <tr><td>per-vault history, including operations the owner never signed (a keeper's REFRESH,
+      liquidations, redemptions against the vault)</td>
+      <td>follow each vault's outpoint chain; every hop reveals its witness</td></tr>
+  <tr><td>collateral amounts, reserve balance, pot balance</td>
+      <td>explicit by protocol rule; the pot and reserve are single UTXOs at constant
+      addresses</td></tr>
+  <tr><td>system statistics: outstanding OBOL (<code>supply - pot balance</code>), aggregate
+      collateral, the CR distribution at a given price, liquidation candidates</td>
+      <td>derived from the above; outstanding OBOL and the per-vault debt sum reconcile
+      exactly, since fees are L-BTC and every mint moves through the pot</td></tr>
+</table></div>
+
+<h3>Required from outside the chain</h3>
+
+<ul>
+  <li><b>The frozen covenant artifacts.</b> Simplicity witness values are not
+  self-describing; decoding them - and building control blocks for new spends - requires the
+  published compiled covenants and genesis parameters. A generic script parser is not
+  enough: the indexer must be protocol-aware.</li>
+  <li><b>A fresh oracle tick.</b> Prices are an off-chain feed by definition; the chain only
+  ever shows ticks that were already used.</li>
+</ul>
+
+<div class="note"><span class="lbl">Conjured vaults are invisible - and that is correct</span>
+<p>A vault UTXO funded directly at a vault address, bypassing OPEN, reveals nothing until
+spent: its data leaf is unrevealed and it never touched the issuer. The census above therefore
+contains genuine vaults only, which is exactly what statistics want - a conjured vault
+represents no minted OBOL, and it surfaces (in the ATTEST witness) only if its creator pays to
+close it.</p></div>
+
+<div class="note"><span class="lbl">The confidentiality boundary</span>
+<p>Inside a protocol transaction, every output a covenant reads must be explicit - the
+explicit-read jets fail on blinded values, and OPEN pins the borrower's OBOL output outright.
+One hop later the picture inverts: OBOL and L-BTC received from the protocol are ordinary
+Liquid assets, and a standard confidential transaction moves them behind blinded amounts and
+assets. The working model is explicit inside the protocol, confidential immediately outside
+it. Aggregate statistics survive this - outstanding OBOL is computed from the always-explicit
+pot, not from tracking holders.</p></div>
+
+<h2 id="contention"><span class="sec">9</span>Contention and throughput</h2>
+
+<p>The singleton UTXOs are shared mutexes: two users whose transactions spend the same
+singleton race for its current outpoint, and the loser must rebuild. The honest map of who
+contends with whom:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Operation</th><th>Pot</th><th>Reserve</th><th>Issuer</th></tr>
+  <tr><td>OPEN</td><td class="num">yes</td><td class="num">yes</td><td class="num">yes</td></tr>
+  <tr><td>DRAW</td><td class="num">yes</td><td class="num">-</td><td class="num">yes</td></tr>
+  <tr><td>REPAY / CLOSE</td><td class="num">yes</td><td class="num">-</td><td class="num">-</td></tr>
+  <tr><td>LIQUIDATE / FULL-LIQ / REDEEM</td><td class="num">yes</td><td class="num">yes</td><td class="num">-</td></tr>
+  <tr><td>BAD-DEBT</td><td class="num">yes</td><td class="num">yes</td><td class="num">yes</td></tr>
+  <tr><td>POKE</td><td class="num">-</td><td class="num">-</td><td class="num">yes</td></tr>
+  <tr><td>REFRESH</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+</table></div>
+
+<p>The pot is the universal mutex - everything except REFRESH and POKE spends it. The reserve
+is the second, and it sits on the crisis path: every liquidation and redemption routes a fee
+through it. The issuer binds only the mint path and attestations. REFRESH is the one fully
+parallel operation.</p>
+
+<h3>What a mutex costs in practice</h3>
+
+<p>A singleton is not "one operation per block": spends chain in the mempool (subject to the
+node's descendant limit, ~25), so the cooperative ceiling is on the order of about 25
+operations per singleton per one-minute Liquid block. The real cost is the race: a losing
+transaction references a spent outpoint and must be rebuilt against the new tip - and because
+every signature commits SIGHASH_ALL, rebuilt means <b>re-signed</b>. The oracle tick survives a
+rebuild (it binds to the message and the lock time, not to outpoints), and a software key
+re-signs silently; a hardware wallet prompts its user on every lost race. Builders should
+treat retry-on-conflict as the normal path, not an error.</p>
+
+<p>The intended v1 answer is coordination, not sharding: a <b>sequencer</b> service on top of
+the indexer (<a href="#indexer">section 8</a>) that hands builders the current tip of each
+singleton chain and linearizes submissions into a mempool chain. The sequencer holds no keys
+and confers no authority - anyone can bypass it and race permissionlessly; it only removes the
+accidental collisions. Contention metrics from testnet operation, not intuition, should decide
+whether anything more is needed: mints are human-paced, and the crisis burst - liquidations -
+has the ~25 per block ceiling on the pot and reserve chains.</p>
+
+<h3>Sharding is a documented v2 path</h3>
+
+<p>Nothing in the covenants asserts that a singleton is unique - a covenant cannot see the
+UTXO set. That leaves the door open, deliberately documented here and deliberately not taken
+in v1:</p>
+
+<ul>
+  <li><b>K pot lanes - plausibly no covenant change.</b> The pot is recognized by its constant
+  address, and K UTXOs at that address are K independent spend chains. Within one transaction
+  a second pot input cannot validly spend (the inflow leaf pins index 1, the outflow leaf
+  demands token adjacency), so the per-instance guards hold. Lanes cannot be consolidated (the
+  index pin forbids merging two pots in one transaction) but rebalance organically - a REPAY
+  tops up whichever lane the builder picks. Accounting survives: outstanding OBOL is the
+  supply minus the <b>sum</b> of lane balances.</li>
+  <li><b>N issuer lanes - plausibly a genesis-only change.</b> The pot and reserve gate on the
+  token's <b>asset id</b>, not on an address or a count, and <code>recurse_token</code> pins
+  each lane to one unit. Issuing N units into N covenant UTXOs at genesis would keep the same
+  source and the same CMRs. The cost is real: N independent
+  <code>last_mint_height</code> anchors, so the stale-mint defense degrades to the
+  <b>laggiest</b> lane and the POKE duty multiplies by N. Cross-lane composition inside one
+  transaction is blocked by the arms' fixed output indices (two OPENs would both pin outputs
+  0, 1, and 2 and contradict each other).</li>
+  <li><b>The reserve should not be sharded.</b> Mechanically it could be, but the bad-debt
+  payout is <code>min(.., stab_in)</code> against the <b>one fragment</b> being spent - splitting
+  the reserve shrinks the backstop exactly when it is needed whole.</li>
+</ul>
+
+<div class="caution"><span class="lbl">Why this stays v2</span>
+<p>Multi-instance aliasing is precisely the bug class this protocol has already been burned
+by - two vaults aliasing one pot output, the decoy pot, the sybil reserve - and every pin in
+the frozen source was audited under the assumption that each singleton is unique. Any move to
+K pots or N issuers requires a dedicated adversarial pass over the two-instances-per-transaction
+and cross-lane-substitution classes, plus new deploy-preflight invariants. Plausible is not
+proven; do not shard on the strength of this page.</p></div>
+
+<p class="fine">Every layer in the plan corresponds to code that already runs in the reference
+implementation; the SDK work is extraction and typing, not invention.</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

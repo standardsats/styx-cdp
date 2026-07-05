@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reserve and bad debt - STYX v1 specification</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<aside class="side" id="side"></aside>
+<main><div class="page">
+
+<header class="chapter">
+  <div class="kicker">Chapter <span class="gn">ΣΤʹ</span> · the backstop</div>
+  <h1>The stability reserve and bad debt</h1>
+  <p class="lede">The reserve is not a general insurance fund. It is a <b>discontinuous-gap
+  backstop</b>: a continuous crash is fully absorbed by the liquidation ladder and never touches
+  it. What the reserve covers is the residue - single-block price gaps, oracle outages, keeper
+  downtime - and it is engineered to fail gracefully rather than to pretend it cannot fail.</p>
+</header>
+
+<h2 id="funding"><span class="sec">1</span>Funding</h2>
+
+<p>Four covenant-enforced inflows, all in L-BTC:</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Source</th><th>Amount</th><th>When</th></tr>
+  <tr><td>borrow fee</td><td class="num">0.5% of principal</td>
+      <td>every OPEN <a class="src" href="source.html#issuer-L257">issuer.simf:257,295-302</a>. The fee is paid in L-BTC
+      on top of the collateral, so <code>debt = principal</code> and a vault can always be
+      closed with exactly the OBOL it minted</td></tr>
+  <tr><td>partial-liquidation share</td><td class="num">5% of dd</td>
+      <td>every partial liquidation <a class="src" href="source.html#vault-L357">vault.simf:357</a></td></tr>
+  <tr><td>full-liquidation share</td><td class="num">excess / 3</td>
+      <td>every full liquidation - one third of the collateral above par
+      <a class="src" href="source.html#vault-L389">vault.simf:389-391</a></td></tr>
+  <tr><td>redemption fee</td><td class="num">0.5% of x</td>
+      <td>every redemption <a class="src" href="source.html#vault-L442">vault.simf:442</a></td></tr>
+</table></div>
+
+<p>The borrow fee is the structural one: it funds the backstop in proportion to
+<b>origination</b> flow, independent of whether liquidations happen. A bigger liquidation-penalty
+share was deliberately avoided - it fills from the continuous-crash path, which never draws the
+reserve, and stays dry on the gap path, which does. Steady state, the reserve holds on the order
+of 0.5% of outstanding debt. How much to hold is a sizing question with two inputs: the
+liquidation ladder already absorbs a single-block price drop of up to about 23% without ever
+drawing the reserve (those bands self-finance), and only a gap larger than that reaches the
+reserve at all. Holding roughly 0.5% of outstanding debt is enough to backstop a single-block
+gap of about 35%, which leaves a comfortable margin over the ladder's free-absorb range.</p>
+
+<h2 id="baddebt"><span class="sec">2</span>The bad-debt operation</h2>
+
+<p>When a vault's CR falls below 100% at the MAX quote, anyone may clear it. The keeper burns
+the vault's <b>full debt</b> in OBOL into the pot and takes the vault's collateral plus a
+payment from the reserve:</p>
+
+<pre><code>shortfall   = debt_sats - coll
+bounty      = 5%  of debt_sats                    <span class="c">// keeper incentive (E-4)</span>
+cap         = 20% of debt_sats                    <span class="c">// per-vault exposure cap (M-1)</span>
+reserve_pay = min( shortfall + bounty, cap, reserve_balance )
+keeper gets   coll + reserve_pay                  <span class="c">// output 0, pinned exactly</span></code></pre>
+
+<p><a class="src" href="source.html#issuer-L451">issuer.simf:451-474</a>. Three properties carry the design:</p>
+
+<ul>
+  <li><b>The full debt always burns.</b> The pot must grow by exactly <code>debt</code>, and
+  output 0 is pinned so no vault branch other than BAD-DEBT can match - the vault closes,
+  period. A variant that made the keeper whole from a reduced burn was rejected because it
+  reopens the fake-debt drain the attestation exists to close
+  <a class="src" href="source.html#issuer-L483">issuer.simf:483-508</a>.</li>
+  <li><b>The drain is saturating, not reverting.</b> <code>min</code> against the balance means
+  an underfunded reserve pays what it has, down to zero, and the transaction still constructs.
+  The earlier design required <code>shortfall &lt;= balance</code> exactly - a hard cliff where
+  an empty reserve made every remaining bad vault <b>unconstructible</b> and froze them
+  underwater. That cliff was judged the single most important thing to fix: now the failure
+  mode is an explicit accounting deficit, not stranded unbacked OBOL.</li>
+  <li><b>Per-vault exposure is capped at 20% of debt.</b> A vault UTXO is byte-identical whether
+  it ever minted OBOL or was conjured at the right address with dust collateral, so a "fake"
+  underwater vault cannot be excluded outright. The cap makes conjuring strictly loss-making:
+  the attacker must burn ~100% of the debt in real OBOL to pull at most 20% from the reserve -
+  a 4:1 self-griefing cost. A genuine single-block gap past the 130% trigger lands a vault
+  around CR 85% (shortfall ~15%), comfortably inside the cap.</li>
+</ul>
+
+<p>Why the <b>issuer</b> attests: the reserve cannot verify a vault itself - reconstructing a
+vault needs <code>VAULT_CMR</code>, and the vault already reconstructs the reserve, so the
+check in the other direction would close a commitment cycle. The issuer is compiled after the
+vault and is recognizable by a flat token id, so it is the one covenant that can vouch for
+vault genuineness on the reserve's behalf (see
+<a href="architecture.html#dag">the DAG, chapter Βʹ</a>).</p>
+
+<h2 id="keeper"><span class="sec">3</span>Keeper break-even and the deep tail</h2>
+
+<p>The keeper's profit on a bad-debt clear is <code>reserve_pay - shortfall</code>, at most the
+5% bounty. As CR falls, the shortfall grows until it meets the 20% cap: at par that happens at
+<b>CR 80%</b>, where profit reaches zero. Below CR 80% clearing at par is a loss - a dead zone,
+but only at par:</p>
+
+<div class="why"><span class="lbl">The de-peg is the clearing mechanism</span>
+<p>If vaults sit below CR 80% and are not cleared, OBOL trades below the backing ratio of those
+vaults. Once the market price of OBOL is q &lt; CR, the keeper's economics flip: burning debt
+costs <code>q x debt</code> while the seizure returns <code>CR x debt</code>, so clearing
+resumes on its own. The only irrecoverably lost amount is the genuinely missing collateral. A
+depth-scaled bounty was rejected: it would convert a fair socialized haircut into a first-come
+reserve drain.</p></div>
+
+<h2 id="floor"><span class="sec">4</span>The peg floor: min(par, backing)</h2>
+
+<p>REDEEM values a claim of x OBOL at
+<code>coll_at_cr(x, MAX, min(par, backing_k)) - 0.5%</code>
+<a class="src" href="source.html#vault-L438">vault.simf:438-442</a>. While the system is fully backed,
+<code>backing_k &gt;= par</code> and redemption pays par minus the fee - the classic arbitrage
+floor that holds OBOL near $1. When unbacked OBOL exists, redemption pays the <b>backing
+ratio</b> instead:</p>
+
+<ul>
+  <li>At hard par, an under-backed pool is a bank run: early redeemers strip $1 of collateral
+  per OBOL from the healthiest vaults and leave later holders with strictly worse backing. The
+  floor converts that race into an approximately fair pro-rata settlement at the currently
+  signed ratio.</li>
+  <li>This is the honest terminal state of a fixed-supply asset: OBOL is a claim on a vault
+  pool, and when the pool is under-backed the claim is worth the backing ratio. The design
+  documents call this the <b>graceful soft de-peg</b> - a continuous float down to the true
+  ratio instead of a freeze or a collapse.</li>
+  <li>A dilutable backstop token (the MKR pattern) was explicitly rejected for v1: it recreates
+  the unlimited-mint authority the whole design removes, and it fails reflexively in exactly
+  the systemic tail it is meant to cover.</li>
+</ul>
+
+<p><code>backing_k</code> is signed by the same 3-of-5 quorum inside the regular tick (the
+oracle can see aggregate supply and collateral; a per-transaction covenant cannot), and only
+this one arm reads it. Every accepted signature covers the same field, so under the 2-Byzantine
+bound at least one honest signer vouches for the figure.</p>
+
+<h2 id="identity"><span class="sec">5</span>Reserve identity</h2>
+
+<p>The reserve is a single constant address with no data leaf
+<a class="src" href="source.html#stability-L8">stability.simf:8-9</a>. Identity questions - is this the genuine reserve? -
+reduce to one flat scriptHash pin, <code>STABILITY_SPK</code>, on every path that pays it. An
+earlier design gave the reserve a mutable ratcheted address; it opened a sybil-reserve fee
+diversion (route the mandatory fee to a lookalike) and a griefing freeze (poison the ratchet to
+u32::MAX), and its removal also fixed a liveness bug - multiple crash-underwater vaults now
+clear against one tick. Freshness for the reserve's one shrink path lives on the issuer's global
+anchor instead. The operational consequence: keep exactly <b>one</b> reserve UTXO (and one pot
+UTXO) - the covenant cannot consolidate fragments (see
+<a href="building.html#invariants">chapter Ιʹ</a>).</p>
+
+<nav class="pager" id="pager"></nav>
+</div></main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

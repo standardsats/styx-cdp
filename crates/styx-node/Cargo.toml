@@ -1,0 +1,12 @@
+[package]
+name = "styx-node"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 node adapter: elementsd RPC, protocol scanning, broadcast, regtest harness"
+
+[dependencies]
+styx-core = { path = "../styx-core" }
+styx-pset = { path = "../styx-pset" }
+elementsd = { workspace = true }
+thiserror = { workspace = true }

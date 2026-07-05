@@ -13,7 +13,8 @@ green. Statuses: [ ] planned, [x] done.
   issuer), leaf VC words, NUMS, tapleaf tag, golden spks under test params, deploy preflight
   as a Result (duplicate/negated oracle keys, asset collisions). Stale pins are
   unrepresentable: `Artifacts::compile` wires every pin from the just-compiled sibling;
-  checking against published artifacts is deploy tooling (M11).
+  checking the compiled pins against the actually-published artifacts is production deploy
+  tooling, out of the v1 scope.
 - [x] **M3 - witness encoders (type conformance).** `ToSimf` layer, the three op enums and their
   total lowerings; the OP sum types equal the covenant-declared witness types, and every
   variant satisfies its covenant.
@@ -57,10 +58,17 @@ green. Statuses: [ ] planned, [x] done.
   are refused at emission; golden PSET digests per op family. Fragmented pot/reserve is
   unrepresentable at the builder API (ProtocolState holds one of each) - the scanner-side
   refusal lands with M11.
-- [ ] **M11 - node adapter + e2e.** Protocol scanner (single-UTXO enforcement), broadcast with
-  retry-on-conflict, regtest harness, full lifecycle smoke, prune-vs-node calibration
-  spot-checks.
+- [x] **M11 - node adapter + e2e.** styx-node: typed RPC client, the regtest deployment
+  ceremony (two non-reissuable issuances, artifacts against the real asset ids, reserve
+  seed), scan_protocol with asset filtering and the single-UTXO refusal (L-3, proven on
+  node with a fragmented reserve), broadcast with the Conflict/Rejected split (the retry
+  loop itself belongs to the role daemons). The on-node smoke runs the whole lifecycle
+  through the builders - poke, open, repay, draw, refresh, partial liquidate, bad debt,
+  full-liq, redeem, close - with three inline negative spot-checks calibrating
+  prune verdict == node verdict, the pot back at full supply, and the scanner agreeing
+  with the tracked state.
 
 Out of scope for now: role daemons (keeper scheduler, oracle signer service, borrower wallet),
-confidential change outputs, FROST / real oracle data sourcing, fee estimation, CLI tooling, and
-any covenant change.
+confidential change outputs, FROST / real oracle data sourcing, fee estimation, CLI and
+production deploy tooling (including the compiled-pins-vs-published-artifacts check), and any
+covenant change.

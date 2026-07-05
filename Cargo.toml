@@ -18,6 +18,9 @@ secp256k1 = { version = "0.29.0", features = ["rand-std"] }
 elementsd = "0.11.0"
 thiserror = "1"
 proptest = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
 
 [profile.test]
 # Simplicity compilation and pruning in the prune-level tier are CPU-bound; opt-level 1 keeps

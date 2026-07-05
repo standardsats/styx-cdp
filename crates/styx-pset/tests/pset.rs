@@ -129,6 +129,25 @@ fn finalize_refuses_a_bad_funding_signature() {
 }
 
 #[test]
+fn finalize_refuses_a_signature_on_a_non_p2tr_input() {
+    // A key-spend signature installed on an input whose claimed spk is not a v1 witness
+    // program (the e2e op_true funding shape): there is no output key to verify against.
+    let d = TestDeploy::get();
+    let state = protocol_state(100_000_000, 0, 100);
+    let built = styx_pset::build::poke::poke(&d.ctx, &state.issuer, &poke_intent(d.tick(120, 120_000)))
+        .expect("builds");
+    let mut pset = to_pset(&d.ctx, &built.plan).expect("emits");
+    let msg = zkp::Message::from_digest(funding_sighash(&d.ctx, &built.plan, 1).expect("sighash"));
+    let sig = styx_core::secp().sign_schnorr_no_aux_rand(&msg, &keypair(10));
+    pset.inputs_mut()[1].tap_key_sig =
+        Some(styx_core::elements::schnorr::SchnorrSig { sig, hash_ty: SchnorrSighashType::All });
+    assert!(matches!(
+        finalize_pset(&d.ctx, &built.plan, &pset),
+        Err(PsetError::InvalidFundingSignature { input: 1 })
+    ));
+}
+
+#[test]
 fn finalize_pset_differs_from_finalize_only_by_funding_witnesses() {
     // The invariant behind the PSET path: it adds key-spend witnesses on the signed inputs
     // and changes nothing else relative to the raw finalize.

@@ -229,8 +229,8 @@ fn full_lifecycle_smoke() {
 
     // OPEN F and OPEN C at 150%, then merge their OBOL for the full-liq keeper coin.
     let open_at_150 = |funding: OutPoint,
-                           value: u64,
-                           protocol: &mut styx_core::domain::ProtocolState|
+                       value: u64,
+                       protocol: &mut styx_core::domain::ProtocolState|
      -> (OnChain<VaultState>, OutPoint) {
         let h = node.height().unwrap();
         let intent = OpenIntent {
@@ -323,9 +323,7 @@ fn scanner_refuses_a_fragmented_reserve_and_ignores_dust() {
 
     // Foreign-asset dust at the pot and issuer addresses: a griefer can always send it, and
     // the scanner's asset filter must keep the snapshot identical.
-    dep.node
-        .fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.pot_spk(), 1_000)
-        .expect("pot dust");
+    dep.node.fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.pot_spk(), 1_000).expect("pot dust");
     dep.node
         .fund_address(
             dep.ctx.params.policy,

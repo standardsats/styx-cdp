@@ -68,7 +68,41 @@ green. Statuses: [ ] planned, [x] done.
   prune verdict == node verdict, the pot back at full supply, and the scanner agreeing
   with the tracked state.
 
-Out of scope for now: role daemons (keeper scheduler, oracle signer service, borrower wallet),
-confidential change outputs, FROST / real oracle data sourcing, fee estimation, CLI and
-production deploy tooling (including the compiled-pins-vs-published-artifacts check), and any
-covenant change.
+The v1 implementation (M0-M11) is complete. The role-daemon phase (R0-R5 below) turns it into
+a live multi-machine system: separate oracle, wallet, and keeper daemons on a private Elements
+chain, with Nostr as the oracle quote transport. Design context: SETUP.md (added in R5) and the
+deploy/ configs.
+
+- [x] **R0 - private-chain infra + styx-deploy.** styxnet is a custom Elements chain (same
+  CCustomParams path as liquidregtest, so generatetoaddress and the Simplicity evbparam work
+  unchanged; verified on a two-node host spike: equal genesis, Simplicity active, funded
+  follower). deploy/ carries the producer/follower elements.conf templates (validatepegin,
+  anyonecanspendaremine, [styxnet]-section and pchmessagestart gotchas) and produce-blocks.sh.
+  styx-node's Node is now URL-based (from_url / from_elementsd / for_wallet); the ceremony
+  moved to ceremony.rs. styx-deploy: `run` executes the ceremony against a live node and fills
+  styxnet.toml; `verify` recompiles the artifacts and locates the singletons on chain - the
+  compiled-pins-vs-published-artifacts check.
+- [ ] **R1 - styx-watch: the chain indexer.** Infer every vault transition from transaction
+  layout (no witness decoding): OPEN/DRAW births, REPAY/REFRESH/LIQUIDATE/REDEEM transitions,
+  CLOSE/FULLIQ/BADDEBT removals; nLockTime gives last_height for free; a computed successor spk
+  mismatch marks a vault lost. JSON snapshot file, catch-up scan. Anchor test: reindex the e2e
+  smoke chain from genesis and match the smoke's tracked state.
+- [ ] **R2 - quotes: styx-oracle + styx-watch::quotes.** The oracle daemon publishes an
+  addressable Nostr event (d = height) per block plus a debug/admin HTTP surface (/health,
+  /quote, POST /price); the quote client verifies each BIP340 signature against the config's
+  oracle keys before assembling a 3-of-5 OracleTick. Integration test through the embedded
+  LocalRelay.
+- [ ] **R3 - styx-wallet (CLI).** open/repay/draw/refresh/close/redeem/status/fund over the
+  builder pipeline (owner_sign + sign_funding + finalize_pset). Owner wallet tracked by the
+  indexer. On-node CLI cycle against a regtest node with a mock quote source.
+- [ ] **R4 - styx-keeper.** A pure decide(vault, tick, config) -> Action ladder
+  (bad-debt / full-liq / partial with plan_partial, property-tested against the builder) plus
+  the watchtower duties (poke the issuer toward the tip, refresh dormant healthy vaults, M-2)
+  and retry-on-conflict. On-host smoke: wallet opens, oracles cheapen, keeper liquidates.
+- [ ] **R5 - multi-machine assembly.** nostr-rs-relay in the flake, per-role configs/units,
+  SETUP.md (bring-up across 3-4 machines), a scenario script (POST /price crash -> observe
+  the cascade), and a same-host swarm rehearsal.
+
+Out of scope for this phase: FROST / multisig of the oracle protocol key, a real price feed
+(behind a PriceSource trait), confidential change outputs, and automated redeem arbitrage by
+the keeper (the decision ladder leaves room to add it).

@@ -1,0 +1,12 @@
+[package]
+name = "styx-watch"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 daemon base: shared network config, chain indexer, oracle quote client"
+
+[dependencies]
+styx-core = { path = "../styx-core" }
+serde = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }

@@ -4,7 +4,8 @@
 use std::str::FromStr;
 
 use elementsd::bitcoincore_rpc::jsonrpc::serde_json::{json, Map, Value as JsonValue};
-use elementsd::bitcoincore_rpc::RpcApi;
+pub use elementsd::bitcoincore_rpc::Auth;
+use elementsd::bitcoincore_rpc::{Client, RpcApi};
 use elementsd::ElementsD;
 use styx_core::elements::encode::{deserialize, serialize_hex};
 use styx_core::elements::hex::FromHex;
@@ -18,14 +19,38 @@ pub const FEE: Sats = Sats::new(10_000);
 /// The wallet-level fee for setup transactions.
 pub const FEE_RPC: u64 = 100_000;
 
+/// A connection to one elementsd. Daemons talk to their own machine's node by URL; the
+/// regtest harness wraps the child process it spawned. The base URL and auth are kept so a
+/// wallet-scoped client (`for_wallet`) can be derived once a wallet exists - wallet RPCs
+/// need the `/wallet/<name>` path.
 pub struct Node {
-    pub d: ElementsD,
+    base_url: String,
+    auth: Auth,
+    client: Client,
 }
 
 impl Node {
+    /// Connect to an external node (the multi-machine setup: every daemon talks to its own
+    /// elementsd, usually over localhost RPC).
+    pub fn from_url(url: &str, auth: Auth) -> Result<Self, NodeError> {
+        let client = Client::new(url, auth.clone())
+            .map_err(|e| NodeError::Rpc { method: "connect".into(), message: e.to_string() })?;
+        Ok(Node { base_url: url.trim_end_matches('/').to_string(), auth, client })
+    }
+
+    /// Connect to a harness-spawned child process (cookie auth).
+    pub fn from_elementsd(d: &ElementsD) -> Result<Self, NodeError> {
+        Self::from_url(&d.rpc_url(), Auth::CookieFile(d.params().cookie_file.clone()))
+    }
+
+    /// A client scoped to a loaded wallet (the `/wallet/<name>` URI path). Non-wallet RPCs
+    /// still work through it.
+    pub fn for_wallet(&self, wallet: &str) -> Result<Self, NodeError> {
+        Self::from_url(&format!("{}/wallet/{wallet}", self.base_url), self.auth.clone())
+    }
+
     pub fn rpc(&self, method: &str, args: &[JsonValue]) -> Result<JsonValue, NodeError> {
-        self.d
-            .client()
+        self.client
             .call::<JsonValue>(method, args)
             .map_err(|e| NodeError::Rpc { method: method.into(), message: e.to_string() })
     }
@@ -158,7 +183,7 @@ impl Node {
     }
 
     /// Fund op_true coins of the given values (funding and fee coins for the e2e flow; the
-    /// prune tier proves the real-key signing path, the e2e keeps the prototype's shape).
+    /// prune tier proves the real-key signing path, so the e2e can keep its coins keyless).
     pub fn fund_optrue(&self, policy: AssetId, values: &[u64]) -> Result<Vec<OutPoint>, NodeError> {
         use styx_pset::layout::{fee_out, txin, txout};
         let (op, sats, _) = self.biggest_coin()?;

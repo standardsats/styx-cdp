@@ -14,11 +14,21 @@ The compiler enforces the layering: `styx-pset` cannot grow node IO because `ele
 in its dependency tree.
 
 ```
-styx-node  ->  styx-pset  ->  styx-core
-(elementsd     (PSET builders,   (pure: units, math, oracle ticks,
- adapter,       sign, finalize)   domain state, covenant artifacts,
- e2e tests)                       witness encoders)
+             styx-deploy / styx-oracle / styx-keeper / styx-wallet   (role daemons, R phase)
+                    |               \
+                 styx-watch  ->  styx-node  ->  styx-pset  ->  styx-core
+                 (daemon base:   (elementsd    (PSET builders,   (pure: units, math,
+                  styxnet.toml,   adapter,      sign, finalize)   oracle ticks, domain,
+                  chain indexer,  scan,                           covenant artifacts,
+                  quote client)   broadcast,                      witness encoders)
+                                  regtest harness)
 ```
+
+The bottom three crates are the frozen v1 implementation (M0-M11). The role-daemon phase
+(R0-R5, see ROADMAP.md) adds `styx-watch` (the shared daemon base: the `styxnet.toml`
+deployment config, and - landing in R1/R2 - the chain indexer and the Nostr quote client) and
+the four binaries. Tokio / axum / reqwest / nostr-sdk / clap live only in these new crates, so
+the core stays minimal.
 
 - **styx-core** - everything deterministic and IO-free. Unit newtypes (`Sats`, `Obol`, `Price`,
   `RatioK`, `BlockHeight`) with checked math; the CR formula `coll_at_cr` (exact truncation
@@ -33,9 +43,13 @@ styx-node  ->  styx-pset  ->  styx-core
   the body is fixed first, signatures come second, covenant witnesses are pruned last). Builders
   refuse to build anything the covenants would reject: a prune rejection of a builder-produced
   tx is a bug, and the test suite asserts that equivalence op by op.
-- **styx-node** - the only impure crate: elementsd RPC, protocol-state scanning, broadcast with
-  retry-on-conflict (every mint serializes through the one issuer UTXO), the regtest harness,
-  and the on-node e2e acceptance suite.
+- **styx-node** - the elementsd adapter: a URL-based RPC client (`from_url` / `from_elementsd`
+  / `for_wallet`), protocol-state scanning with the single-UTXO refusal, broadcast with the
+  Conflict/Rejected split (every mint serializes through the one issuer UTXO), the deployment
+  ceremony (`ceremony.rs`, reused by the regtest harness and styx-deploy), and the on-node e2e
+  acceptance suite.
+- **styx-watch** - the shared base of the role daemons: the `styxnet.toml` config type now,
+  the chain indexer and the Nostr quote client in R1/R2.
 
 ## Covenants and the freeze
 

@@ -51,9 +51,8 @@ fn scan_spk(
             u["vout"].as_u64().ok_or(crate::NodeError::Shape { context: "scantxoutset vout" })? as u32;
         // scantxoutset reports BTC-denominated f64 amounts; exact for the protocol's range
         // (the 52-bit mantissa covers every representable satoshi amount).
-        let amount = u["amount"]
-            .as_f64()
-            .ok_or(crate::NodeError::Shape { context: "scantxoutset amount" })?;
+        let amount =
+            u["amount"].as_f64().ok_or(crate::NodeError::Shape { context: "scantxoutset amount" })?;
         out.push((OutPoint::new(txid, vout), (amount * 1e8).round() as u64));
     }
     Ok(out)
@@ -99,7 +98,9 @@ pub fn find_issuer(
     for h in heights {
         let state = IssuerState { last_mint_height: BlockHeight::new(h) };
         if let Some((outpoint, _)) =
-            scan_spk(node, &ctx.artifacts.issuer_spk(&state), ctx.params.issuer_token)?.into_iter().next()
+            scan_spk(node, &ctx.artifacts.issuer_spk(&state), ctx.params.issuer_token)?
+                .into_iter()
+                .next()
         {
             return Ok(OnChain { state, outpoint, value: 1 });
         }

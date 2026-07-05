@@ -1,0 +1,14 @@
+[package]
+name = "styx-deploy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 deployment tool: the ceremony against a live node + styxnet.toml emission and verification"
+
+[dependencies]
+styx-core = { path = "../styx-core" }
+styx-pset = { path = "../styx-pset" }
+styx-node = { path = "../styx-node" }
+styx-watch = { path = "../styx-watch" }
+clap = { workspace = true }
+thiserror = { workspace = true }

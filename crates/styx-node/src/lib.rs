@@ -7,6 +7,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
+pub mod ceremony;
 pub mod client;
 // The regtest ceremony is test-harness code and panics on failure by design.
 #[allow(clippy::unwrap_used, clippy::expect_used)]

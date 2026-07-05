@@ -9,9 +9,11 @@ green. Statuses: [ ] planned, [x] done.
 - [x] **M1 - math core.** `coll_at_cr` vectors, truncation direction, zero-price, overflow width
   (settled: the covenant computes in exact 32x32 -> 64 jets over a u32 debt domain enforced by
   the mint gate, so the port takes u32 cents and cannot overflow), named band constants.
-- [ ] **M2 - leaves, taproot, addresses, preflight.** Golden data-leaf bytes (45B vault, 5B
-  issuer), leaf VC words, NUMS, tapleaf tag, golden addresses under test params, deploy
-  preflight as a Result (duplicate/negated oracle keys, asset collision, stale pins).
+- [x] **M2 - leaves, taproot, addresses, preflight.** Golden data-leaf bytes (45B vault, 5B
+  issuer), leaf VC words, NUMS, tapleaf tag, golden spks under test params, deploy preflight
+  as a Result (duplicate/negated oracle keys, asset collisions). Stale pins are
+  unrepresentable: `Artifacts::compile` wires every pin from the just-compiled sibling;
+  checking against published artifacts is deploy tooling (M11).
 - [ ] **M3 - witness encoders (type conformance).** `ToSimf` layer, the three op enums and their
   total lowerings; every variant type-checks against the covenant's declared witness type.
 - [ ] **M4 - prune harness + POKE + OPEN.** Testkit (deploy fixture, chain-state factory,

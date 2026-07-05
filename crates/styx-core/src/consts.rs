@@ -50,7 +50,8 @@ pub const INTERNAL_KEY_HEX: &str = "50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec
 
 /// The canonical NUMS internal key as an x-only pubkey.
 pub fn nums_key() -> XOnlyPublicKey {
-    // A constant that parses by construction; `preflight` re-checks canonicality at deploy time.
+    // The derivation test proves this constant is the BIP341 H: sha256 of the uncompressed
+    // generator encoding, so its discrete log is unknown and no key-path spend exists.
     #[allow(clippy::unwrap_used)]
     XOnlyPublicKey::from_str(INTERNAL_KEY_HEX).unwrap()
 }

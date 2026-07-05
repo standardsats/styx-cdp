@@ -131,5 +131,9 @@ fn frozen_cmrs_match_v1_freeze() {
 #[test]
 fn all_five_covenants_compile() {
     // cmrs() is cached, so this shares the compile work with the freeze test.
-    assert_eq!(cmrs().len(), 5);
+    let got = cmrs();
+    assert_eq!(got.len(), Covenant::ALL.len());
+    for ((name, _), cov) in got.iter().zip(Covenant::ALL) {
+        assert_eq!(*name, cov.name(), "golden list order != Covenant::ALL (compile order)");
+    }
 }

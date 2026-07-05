@@ -21,6 +21,8 @@ pub type U256 = simplicityhl::num::U256;
 
 pub mod artifacts;
 pub mod consts;
+pub mod math;
+pub mod units;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

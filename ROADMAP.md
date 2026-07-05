@@ -6,8 +6,9 @@ green. Statuses: [ ] planned, [x] done.
 - [x] **M0 - freeze gate + scaffold.** Workspace, nix toolchain, vendored frozen covenants,
   `golden::frozen_cmrs_match_v1_freeze` reproduces the five CMRs recorded at the prototype's
   `v1-covenant-freeze` tag.
-- [ ] **M1 - math core.** `coll_at_cr` vectors, truncation direction, zero-price, overflow width
-  (u64 vs u128, decided against the frozen covenant jets), named band constants.
+- [x] **M1 - math core.** `coll_at_cr` vectors, truncation direction, zero-price, overflow width
+  (settled: the covenant computes in exact 32x32 -> 64 jets over a u32 debt domain enforced by
+  the mint gate, so the port takes u32 cents and cannot overflow), named band constants.
 - [ ] **M2 - leaves, taproot, addresses, preflight.** Golden data-leaf bytes (45B vault, 5B
   issuer), leaf VC words, NUMS, tapleaf tag, golden addresses under test params, deploy
   preflight as a Result (duplicate/negated oracle keys, asset collision, stale pins).

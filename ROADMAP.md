@@ -51,8 +51,12 @@ green. Statuses: [ ] planned, [x] done.
   equality (the Rust value is accepted, the value plus one is not) across the u32 domain
   and the protocol k literals; 64 end-to-end cases prove the heal-band edges are one-sat
   tight through the liquidate builder.
-- [ ] **M10 - PSET invariants.** Golden PSETs, finalize == raw tx, blinded-output and
-  fragmented-state refusals, E-5 keeper payout binding (SIGHASH_ALL, redirect test).
+- [x] **M10 - PSET invariants.** to_pset fills witness_utxo and the covenant inputs' taproot
+  metadata; sign_funding only produces SIGHASH_ALL and finalize_pset refuses anything else
+  (E-5, plus the redirect test: a moved payout kills the signature); non-explicit outputs
+  are refused at emission; golden PSET digests per op family. Fragmented pot/reserve is
+  unrepresentable at the builder API (ProtocolState holds one of each) - the scanner-side
+  refusal lands with M11.
 - [ ] **M11 - node adapter + e2e.** Protocol scanner (single-UTXO enforcement), broadcast with
   retry-on-conflict, regtest harness, full lifecycle smoke, prune-vs-node calibration
   spot-checks.

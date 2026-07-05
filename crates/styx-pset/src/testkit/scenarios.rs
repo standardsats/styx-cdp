@@ -273,3 +273,21 @@ fn redeem_at(d: &TestDeploy, backing_k: styx_core::units::RatioK) -> Scenario {
         build::redeem::redeem(&d.ctx, &protocol, &vault_on_chain(vault, COLL), &intent).expect("builds");
     Scenario { plan: built.plan, tick, amount: Obol::new(x), owner, vault }
 }
+
+/// The canonical OPEN plan under the shared numbers (no Scenario wrapper: OPEN creates the
+/// vault, so there is no input-0 vault to describe).
+pub fn open_plan(d: &TestDeploy) -> TxPlan {
+    let protocol = protocol_state(100_000_000, 1_000_000, LH);
+    build::open::open(&d.ctx, &protocol, &super::open_intent(d.tick(H, 120_000), Obol::new(DEBT)))
+        .expect("builds")
+        .plan
+}
+
+/// The canonical liquidate layout under a caller-supplied intent (custom keeper funding).
+pub fn liquidate_funded(d: &TestDeploy, intent: LiquidateIntent) -> TxPlan {
+    let (vault, _) = base_vault(DEBT);
+    let protocol = protocol_state(POT, 1_000_000, LH);
+    build::liquidate::liquidate(&d.ctx, &protocol, &vault_on_chain(vault, 100_000_000), &intent)
+        .expect("builds")
+        .plan
+}

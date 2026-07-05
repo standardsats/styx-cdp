@@ -1,0 +1,471 @@
+/*
+ * STYX v1 - vault covenant. The per-position CDP.
+ *
+ * NOTE: the `match` below is a Simplicity `case` node, so the program must
+ * PRUNE against the spend env (satisfy_with_env) before encoding, else
+ * Elements' Anti-DOS CHECK_CASE rejects the unpruned program.
+ *
+ *   data leaf  = OP_RETURN || debt(8 BE) || owner(32) || last_height(4 BE)   (45 B, unspendable)
+ *   vault addr = taproot(NUMS, tapbranch( leaf(this CMR), dataleaf(debt, owner, last_height) ))
+ *
+ * `last_height` is the freshness ratchet (the most recent oracle height the vault acknowledged):
+ * every collateral-removing op (liquidate/redeem/bad-debt) and ratchet-advancing op (draw/refresh)
+ * requires a tick STRICTLY NEWER than it, so a stale tick from a past dip cannot be replayed. The
+ * owner advances it via DRAW or a health-gated REFRESH (proving CR >= 130%); permissionless ops
+ * respect it but never advance it (so a self-redeem cannot dodge liquidation).
+ *
+ * `debt` is static (no interest); it changes only by recursing to a new vault address.
+ * Ops: CLOSE / REPAY / DRAW (owner-signed); partial LIQUIDATE (heal-to-target), FULL-LIQ,
+ * BAD-DEBT liquidation, and REDEEM (the peg floor), all permissionless. Liquidation is a fast
+ * partial heal-to-target with no challenge window or delay.
+ * Partial liquidation heals the residual to CR [132%, 137%] and caps the owner's loss at
+ * 1.15 * dd; bad-debt liquidation (CR < 100%) repays the full debt and lets the stability
+ * reserve cover the shortfall; redeem swaps X OBOL for X worth of collateral at the peg floor.
+ * The 3-of-5 directional quorum bounds a lying oracle.
+ *
+ * Witness OP (nested Either sum; the arm map is below):
+ *   owner op  = Left( (owner_sig, kind) )                 kind = close / repay / draw
+ *   partial   = Right( Left( (dd, tick) ) )               permissionless, heal-to-target
+ *   full-liq  = Right( Right( Left( tick ) ) )            permissionless, full (CR in [100%,115%])
+ *   bad-debt  = Right( Right( Right( Left( tick ) ) ) )   permissionless, full (CR < 100%)
+ *   redeem    = Right( Right( Right( Right( Left( (X, tick) ) ) ) ) )  permissionless, peg floor
+ *   refresh   = Right( Right( Right( Right( Right( tick ) ) ) ) )      PERMISSIONLESS ratchet advance (M-2)
+ * (kind = Left(()) close | Right(Left(r)) repay | Right(Right((d,tick))) draw)
+ * REFRESH is permissionless (M-2): any keeper can advance a HEALTHY vault's last_height toward the tip,
+ * so a stale dip tick cannot be replayed to seize a since-recovered vault's collateral. It only ADVANCES
+ * last_height and preserves debt+collateral, and an unhealthy vault cannot be refreshed - so no owner
+ * signature is needed and it can never dodge a genuine liquidation. Per-vault analog of the issuer POKE.
+ * The oracle tick is (height, (backing_k, [slot; 5])) - a 3-of-5 quorum of optional oracle quotes
+ * at a shared height plus a co-signed backing_k (the global backing ratio, used only by REDEEM's
+ * floor); verify_quorum verifies exactly three, timelocks to the height, and returns (min, max).
+ *
+ * Params: NUMS, TAPLEAF_TAG, LEAF_VC (= 0xc4 << 8 | 0x2d), OBOL_ID, ORACLE_PK_1..5, POLICY,
+ * POT_SPK, STABILITY_SPK (the constant-address stability reserve's flat scriptHash, pinned on the
+ * liquidate / redeem fee). Witness: DEBT, OWNER, LAST_HEIGHT, OP.
+ */
+fn dataleaf_hash(debt: u64, owner: u256, last_height: u32) -> u256 {
+    let tag: u256 = param::TAPLEAF_TAG;
+    let h: Ctx8 = jet::sha_256_ctx_8_init();
+    let h: Ctx8 = jet::sha_256_ctx_8_add_32(h, tag);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_32(h, tag);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_2(h, param::LEAF_VC); // leaf version || compact_size(45)
+    let h: Ctx8 = jet::sha_256_ctx_8_add_1(h, 106);            // 0x6a OP_RETURN (script byte 0)
+    let h: Ctx8 = jet::sha_256_ctx_8_add_8(h, debt);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_32(h, owner);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_4(h, last_height); // freshness ratchet: the last oracle
+    jet::sha_256_ctx_8_finalize(h)                          // height this vault acknowledged
+}
+
+// sha256 of this vault's scriptPubKey if it commits to (debt, owner, last_height).
+fn own_spk_hash_for(debt: u64, owner: u256, last_height: u32) -> u256 {
+    let leaf0: u256 = jet::build_tapleaf_simplicity(jet::script_cmr());
+    let leaf1: u256 = dataleaf_hash(debt, owner, last_height);
+    let merkle: u256 = jet::build_tapbranch(leaf0, leaf1);
+    let outkey: u256 = jet::build_taptweak(jet::internal_key(), merkle);
+    let h: Ctx8 = jet::sha_256_ctx_8_init();
+    let prefix: u16 = 0x5120;
+    let h: Ctx8 = jet::sha_256_ctx_8_add_2(h, prefix);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_32(h, outkey);
+    jet::sha_256_ctx_8_finalize(h)
+}
+
+// One oracle quote: verify a signature over sha256(height(4 BE) || price(4 BE)); return price.
+fn check_quote(pk: u256, height: u32, backing_k: u32, quote: (u32, Signature)) -> u32 {
+    let (price, sig): (u32, Signature) = quote;
+    let h: Ctx8 = jet::sha_256_ctx_8_init();
+    let h: Ctx8 = jet::sha_256_ctx_8_add_4(h, height);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_4(h, price);
+    let h: Ctx8 = jet::sha_256_ctx_8_add_4(h, backing_k); // oracles co-sign the backing ratio in the same tick
+    let msg: u256 = jet::sha_256_ctx_8_finalize(h);
+    jet::bip_0340_verify((pk, msg), sig);
+    // reject a zero price: coll_at_cr / required_sats divide by price*200 and divide_64(n,0)=0, so a
+    // single oracle signing price=0 would collapse the MIN-quote health gate to 0 (mint against no
+    // collateral) - breaking the 1-of-3 fault model. A valid quote is strictly positive.
+    assert!(jet::lt_32(0, price));
+    price
+}
+
+// One quote SLOT for a fixed oracle key: Left(()) = this oracle did not sign this tick; Right(quote)
+// = it did. process_slot folds (count, lo, hi) over the five slots and verifies the sig ONLY on the
+// Right branch (so after pruning exactly `count` bip340 checks run). check_quote asserts price > 0.
+fn process_slot(pk: u256, height: u32, backing_k: u32, slot: Either<(), (u32, Signature)>, acc: (u32, u32, u32)) -> (u32, u32, u32) {
+    let (count, lo, hi): (u32, u32, u32) = acc;
+    match slot {
+        Left(_absent: ()) => (count, lo, hi),
+        Right(quote: (u32, Signature)) => {
+            let price: u32 = check_quote(pk, height, backing_k, quote);
+            let (of, c): (bool, u32) = jet::add_32(count, 1);
+            assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(of)), 0));
+            (c, jet::min_32(lo, price), jet::max_32(hi, price))
+        }
+    }
+}
+
+// 3-of-5 quorum at a shared height: five oracle keys, each with an OPTIONAL signed quote; EXACTLY
+// three must sign (the threshold). Verifies those three, timelocks the spend to the height, returns
+// (min, max). With <= 2 Byzantine oracles any three DISTINCT keys contain >= 1 honest, so the honest
+// quote floors MIN/MAX (value safety in BOTH directions); and any three of five online suffice
+// (tolerates 2 offline - the 3-of-3 liveness single-point-of-failure is gone). Callers pick the
+// quantile that makes their action harder to abuse: MIN for health (open/draw), MAX for removal.
+fn verify_quorum(height: u32, backing_k: u32, quotes: [Either<(), (u32, Signature)>; 5]) -> (u32, u32) {
+    let [s1, s2, s3, s4, s5]: [Either<(), (u32, Signature)>; 5] = quotes;
+    let a0: (u32, u32, u32) = (0, 4294967295, 0); // (count, lo = u32::MAX sentinel, hi = 0 sentinel)
+    let a1: (u32, u32, u32) = process_slot(param::ORACLE_PK_1, height, backing_k, s1, a0);
+    let a2: (u32, u32, u32) = process_slot(param::ORACLE_PK_2, height, backing_k, s2, a1);
+    let a3: (u32, u32, u32) = process_slot(param::ORACLE_PK_3, height, backing_k, s3, a2);
+    let a4: (u32, u32, u32) = process_slot(param::ORACLE_PK_4, height, backing_k, s4, a3);
+    let a5: (u32, u32, u32) = process_slot(param::ORACLE_PK_5, height, backing_k, s5, a4);
+    let (count, lo, hi): (u32, u32, u32) = a5;
+    assert!(jet::eq_32(count, 3)); // exactly three distinct oracles signed (the 3-of-5 threshold)
+    // height must be a BLOCK height, not a BIP65 timestamp. check_lock_height already makes any
+    // height >= 500000000 unsatisfiable (lockHeight is forced to 0 in timestamp mode), so this is
+    // defense in depth / local visibility: it states the ratchet-bound invariant here rather than
+    // resting it on the jet's timestamp semantics, so last_height can never be advanced past a
+    // reachable block (no far-future brick of the removal/refresh arms).
+    assert!(jet::lt_32(height, 500000000));
+    jet::check_lock_height(height);
+    (lo, hi)
+}
+
+// Collateral sats needed for `debt_cents` of debt at collateral ratio CR = k / 2_000_000,
+// at `price` (USD/BTC). k = CR_percent * 2_000_000: 300000000 = 150%, 260000000 = 130%,
+// 230000000 = 115%, 264000000 = 132%, 274000000 = 137%. divide_64 truncates; the gate (<
+// threshold) and the extraction cap (<= threshold) both truncate in the protocol-favoring
+// direction, and the residual band [132%,137%] absorbs the sub-satoshi slack on the heal bounds.
+fn coll_at_cr(debt_cents: u32, price: u32, k: u32) -> u64 {
+    let numerator: u64 = jet::multiply_32(debt_cents, k);
+    let denom: u64 = jet::multiply_32(price, 200);
+    jet::divide_64(numerator, denom)
+}
+
+fn explicit_output_amount(idx: u32) -> u64 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (_asset, amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(amount)
+}
+
+fn explicit_output_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+
+// The OBOL pot successor (output 1) IS the genuine pot (scriptHash == POT_SPK, a flat param),
+// is OBOL, and equals pot_in (input 1) + delta. Pinning POT_SPK closes the reserve-identity gap:
+// without it a spender could route the returned OBOL to a fake "reserve" they control and lower
+// the debt for free. POT_SPK is vault-independent (the pot reconstructs nobody - open/draw, the
+// only vault-reconstructing leaves, live in the separate token-gated issuer), so V -> POT_SPK
+// does not cycle with the issuer's I -> V. See ../README.md and ../../v1-SCOPE.md.
+fn pot_grows_by(delta: u64) {
+    // pin BOTH ends of the pot to POT_SPK, symmetric with pot_shrinks_by. Input 1 is the pot on every
+    // inflow path (repay / close / liquidate / redeem / bad-debt; reserve_repay pins current_index==1).
+    // Without the input pin, value conservation still forces `delta` fresh OBOL into a POT_SPK output,
+    // but a spend could leave the genuine pot UTXO unspent and mint delta into a NEW POT_SPK UTXO from
+    // an arbitrary OBOL coin; pinning the input closes that so the release comes from the real pot.
+    assert!(jet::eq_256(param::POT_SPK, unwrap(jet::input_script_hash(1))));
+    assert!(jet::eq_256(param::POT_SPK, unwrap(jet::output_script_hash(1))));
+    assert!(jet::eq_256(param::OBOL_ID, explicit_output_asset(1)));
+    let reserve_out: u64 = explicit_output_amount(1);
+    let (r_asset, r_amount): (Asset1, Amount1) = unwrap(jet::input_amount(1));
+    assert!(jet::eq_256(param::OBOL_ID, unwrap_right::<(u1, u256)>(r_asset)));
+    let reserve_in: u64 = unwrap_right::<(u1, u256)>(r_amount);
+    let (overflow, expected): (bool, u64) = jet::add_64(reserve_in, delta);
+    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(overflow)), 0));
+    assert!(jet::eq_64(reserve_out, expected));
+}
+
+// DRAW counterpart: the pot successor (output 1) is the genuine pot, OBOL, and equals pot_in - d.
+fn pot_shrinks_by(d: u64) {
+    // pin BOTH ends of the pot to POT_SPK (H1): the released OBOL must leave the genuine pot, not a
+    // plain OBOL coin (which would let a DRAW fragment OBOL to the real pot without pot_outflow ever
+    // running). OPEN already pins its input pot; this mirrors it on DRAW.
+    assert!(jet::eq_256(param::POT_SPK, unwrap(jet::input_script_hash(1))));
+    assert!(jet::eq_256(param::POT_SPK, unwrap(jet::output_script_hash(1))));
+    assert!(jet::eq_256(param::OBOL_ID, explicit_output_asset(1)));
+    let reserve_out: u64 = explicit_output_amount(1);
+    let (r_asset, r_amount): (Asset1, Amount1) = unwrap(jet::input_amount(1));
+    assert!(jet::eq_256(param::OBOL_ID, unwrap_right::<(u1, u256)>(r_asset)));
+    let reserve_in: u64 = unwrap_right::<(u1, u256)>(r_amount);
+    let (underflow, expected): (bool, u64) = jet::subtract_64(reserve_in, d);
+    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(underflow)), 0)); // d <= pot_in
+    assert!(jet::eq_64(reserve_out, expected));
+}
+
+// output 0 is a vault at (new_debt, owner, new_last_height) holding L-BTC collateral (POLICY).
+fn recurse_to(new_debt: u64, owner: u256, new_last_height: u32) {
+    assert!(jet::eq_256(own_spk_hash_for(new_debt, owner, new_last_height), unwrap(jet::output_script_hash(0))));
+    assert!(jet::eq_256(param::POLICY, explicit_output_asset(0)));
+}
+
+fn current_collateral() -> u64 {
+    let (c_asset, c_amount): (Asset1, Amount1) = jet::current_amount();
+    // the vault's own collateral must be L-BTC (H2), so the CR math compares like with like - a
+    // junk-asset vault input cannot be passed off as collateral against the L-BTC-sat thresholds.
+    assert!(jet::eq_256(param::POLICY, unwrap_right::<(u1, u256)>(c_asset)));
+    unwrap_right::<(u1, u256)>(c_amount)
+}
+
+fn explicit_input_amount(idx: u32) -> u64 {
+    let pair: (Asset1, Amount1) = unwrap(jet::input_amount(idx));
+    let (_asset, amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(amount)
+}
+fn explicit_input_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::input_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+
+// stability (input/output 3) is the genuine reserve, pinned by the flat STABILITY_SPK param. The
+// reserve is now a CONSTANT-address covenant (like the pot), so the vault pins it directly - no
+// reconstruction, no witnessed last_height. This closes the sybil-reserve fee diversion (a keeper
+// could previously route the fee to a reserve UTXO at an arbitrary/bad-debt-proof last_height) and
+// removes the V -> S CMR edge (V now depends on S only through a flat scriptHash param).
+fn stability_grows_by(share: u64) {
+    assert!(jet::eq_256(param::STABILITY_SPK, unwrap(jet::input_script_hash(3))));  // genuine reserve in
+    assert!(jet::eq_256(param::POLICY, explicit_input_asset(3)));                   // reserve input is L-BTC (explicit)
+    assert!(jet::eq_256(param::STABILITY_SPK, unwrap(jet::output_script_hash(3)))); // same address out
+    assert!(jet::eq_256(param::POLICY, explicit_output_asset(3)));
+    let stab_in: u64 = explicit_input_amount(3);
+    let stab_out: u64 = explicit_output_amount(3);
+    let (overflow, expected): (bool, u64) = jet::add_64(stab_in, share);
+    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(overflow)), 0));
+    assert!(jet::eq_64(stab_out, expected));
+}
+
+fn main() {
+    let debt: u64 = witness::DEBT;
+    let owner: u256 = witness::OWNER;
+    let last_height: u32 = witness::LAST_HEIGHT;
+    // bind (debt, owner, last_height) to this address. `last_height` is the freshness ratchet:
+    // the height of the most recent oracle tick this vault has acknowledged. Any op that removes
+    // collateral (liquidate / redeem / bad-debt) or advances the ratchet (draw / refresh) must use
+    // a tick STRICTLY NEWER than last_height, so a stale tick (from a past dip) cannot be replayed.
+    assert!(jet::eq_256(own_spk_hash_for(debt, owner, last_height), jet::current_script_hash()));
+
+    // debt fits in u32 cents, so every `rightmost_64_32(debt)` (liquidate / redeem / bad-debt pricing)
+    // is lossless. OPEN/DRAW already enforce this at mint time, but a vault UTXO can be CONJURED by
+    // funding the reconstructed address directly with an out-of-range debt (no OBOL minted); asserting
+    // it locally here (every arm) makes the bound explicit instead of resting on the emergent
+    // "full debt must be burned into the pot, and supply < 2^32" argument.
+    assert!(jet::lt_64(debt, 4294967296));
+
+    // One vault per tx: the vault sits at input 0 in every flow (owner ops, liquidate, bad-debt,
+    // redeem), so requiring it forbids co-spending two vaults to ALIAS the single shared pot
+    // output. Without this, two equal-debt vaults could each assert `pot_out == pot_in + debt`
+    // against the same output 1 and both pass, returning ONE debt of OBOL while extinguishing TWO
+    // (a backing drain). current_index is the spend's own input position.
+    assert!(jet::eq_32(jet::current_index(), 0));
+
+    // The oracle tick is (height, (backing_k, [slot; 5])). Owner kinds: close / repay / draw;
+    // permissionless: partial-liquidate / full-liq / bad-debt / redeem / refresh (M-2). REFRESH moved to
+    // the permissionless side so any keeper can keep a healthy vault's ratchet fresh (see the header).
+    let op: Either<
+        (Signature, Either<(), Either<u64, (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))>>),
+        Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), (u32, (u32, [Either<(), (u32, Signature)>; 5]))>>>>
+    > = witness::OP;
+    match op {
+        Left(owner_op: (Signature, Either<(), Either<u64, (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))>>)) => {
+            let (owner_sig, kind): (Signature, Either<(), Either<u64, (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))>>) = owner_op;
+            jet::bip_0340_verify((owner, jet::sig_all_hash()), owner_sig);
+            match kind {
+                Left(_close: ()) => {
+                    // CLOSE: return the full debt; collateral is freed to the owner.
+                    pot_grows_by(debt);
+                }
+                Right(rest: Either<u64, (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))>) => {
+                    match rest {
+                        Left(r: u64) => {
+                            // REPAY r: return r, recurse to (debt - r); last_height carries forward.
+                            // REPAY carries no oracle tick, so it cannot gate health - the collateral
+                            // must therefore NOT shrink. Without this an owner REPAYs r=0 and routes the
+                            // whole collateral to themselves while keeping the debt, leaving the minted
+                            // OBOL unbacked (a confirmed collateralization break). Same preservation as
+                            // REFRESH; the tx fee comes from a separate coin, not the locked collateral.
+                            let (underflow, new_debt): (bool, u64) = jet::subtract_64(debt, r);
+                            assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(underflow)), 0));
+                            let coll: u64 = current_collateral();
+                            pot_grows_by(r);
+                            recurse_to(new_debt, owner, last_height);
+                            assert!(jet::le_64(coll, explicit_output_amount(0))); // collateral not reduced
+                        }
+                        Right(draw: (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))) => {
+                            // DRAW d: borrow d more; debt -> debt + d, 150% at the LOWEST quote.
+                            // Advances the ratchet to this tick's height (must be > last_height).
+                            let (d, tick): (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))) = draw;
+                            let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = tick;
+                            let (lo, _hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                            assert!(jet::lt_32(last_height, height)); // strictly fresher
+                            let (overflow, new_debt): (bool, u64) = jet::add_64(debt, d);
+                            assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(overflow)), 0));
+                            assert!(jet::lt_64(new_debt, 4294967296)); // debt fits in u32 cents (no truncation)
+                            pot_shrinks_by(d);
+                            recurse_to(new_debt, owner, height);
+                            let new_debt_cents: u32 = jet::rightmost_64_32(new_debt);
+                            assert!(jet::le_64(coll_at_cr(new_debt_cents, lo, 300000000), explicit_output_amount(0)));
+                        }
+                    }
+                }
+            }
+        }
+        Right(perm: Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), (u32, (u32, [Either<(), (u32, Signature)>; 5]))>>>>) => {
+            match perm {
+                Left(liq: (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))) => {
+                    // LIQUIDATE (permissionless, partial, heal-to-target). All checks use the HIGHEST
+                    // of the three quotes. The keeper repays `dd`; the residual vault keeps the old
+                    // last_height (liquidation proves the OPPOSITE of health, so it must not advance
+                    // the ratchet); the tick must be STRICTLY NEWER than last_height (no stale replay).
+                    let (dd, tick): (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))) = liq;
+                    let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = tick;
+                    let (_lo, hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                    assert!(jet::lt_32(last_height, height)); // fresher than the vault's last ack
+
+                    // dd in (0, debt): a partial repayment, residual vault remains.
+                    assert!(jet::lt_64(0, dd));
+                    let (uf_rd, residual_debt): (bool, u64) = jet::subtract_64(debt, dd);
+                    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(uf_rd)), 0)); // dd <= debt
+                    assert!(jet::lt_64(0, residual_debt));                            // dd < debt (partial)
+
+                    // pre-state gate: the vault is unhealthy, CR < 130% at the MAX quote.
+                    let coll: u64 = current_collateral();
+                    let debt_cents: u32 = jet::rightmost_64_32(debt);
+                    assert!(jet::lt_64(coll, coll_at_cr(debt_cents, hi, 260000000)));
+
+                    // `dd` repaid to the reserve; the vault recurses to (debt - dd, owner), same last_height.
+                    pot_grows_by(dd);
+                    recurse_to(residual_debt, owner, last_height);
+                    let residual_coll: u64 = explicit_output_amount(0);
+
+                    // heal-to-target: the residual vault lands in CR [132%, 137%] at the MAX quote. The
+                    // target sits just above the 130% trigger (was [150%,155%]) so the owner keeps more
+                    // equity and the keeper fronts a smaller `dd` (a smaller per-step collateral dump, less
+                    // liquidation reflexivity); the tradeoff is residuals re-trigger sooner. The 115%
+                    // full-liq boundary is UNCHANGED - it is set by the 1.15 extraction cap below, not the
+                    // heal target - so lowering the target does not reopen the E-3 dead-zone.
+                    let rd_cents: u32 = jet::rightmost_64_32(residual_debt);
+                    assert!(jet::le_64(coll_at_cr(rd_cents, hi, 264000000), residual_coll)); // >= 132%
+                    assert!(jet::le_64(residual_coll, coll_at_cr(rd_cents, hi, 274000000))); // <= 137%
+
+                    // owner protection: the collateral extracted is at most 1.15 * dd worth at the MAX quote.
+                    let (uf_ex, extraction): (bool, u64) = jet::subtract_64(coll, residual_coll);
+                    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(uf_ex)), 0)); // residual_coll <= coll
+                    let dd_cents: u32 = jet::rightmost_64_32(dd);
+                    assert!(jet::le_64(extraction, coll_at_cr(dd_cents, hi, 230000000))); // <= 1.15 * dd
+
+                    // pin the 5% stability fee into the genuine reserve (V -> S; this moved off the
+                    // pot so the pot reconstructs nobody and the reserve can pin POT_SPK on bad-debt).
+                    stability_grows_by(coll_at_cr(dd_cents, hi, 10000000));
+                }
+                Right(rest2: Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), (u32, (u32, [Either<(), (u32, Signature)>; 5]))>>>) => {
+                  match rest2 {
+                    Left(fulliq: (u32, (u32, [Either<(), (u32, Signature)>; 5]))) => {
+                        // FULL LIQUIDATION (permissionless, CR in [100%, 115%] at the MAX quote). This band
+                        // is the partial-liquidation dead-zone (economic finding E-3): a partial heal to
+                        // 132% must extract 1.15x collateral per unit debt, but below CR 115% that ratio
+                        // EXCEEDS the CR, so any partial liquidation pushes the CR DOWN - no heal exists at
+                        // any heal target. Instead the keeper repays the FULL debt and seizes the
+                        // collateral; the vault CLOSES (no successor). Owner's whole excess buffer (coll -
+                        // debt_sats, in [0, 15% of debt]) is the penalty; ONE THIRD goes to the reserve and
+                        // the keeper keeps two thirds - the exact analog of partial-liq's 10:5 split.
+                        let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = fulliq;
+                        let (_lo, hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                        assert!(jet::lt_32(last_height, height)); // fresher than the vault's last ack (no stale replay)
+                        let coll: u64 = current_collateral();
+                        let debt_cents: u32 = jet::rightmost_64_32(debt);
+                        // CR in [100%, 115%]: debt_sats <= coll <= 1.15*debt_sats. Below 100% is bad-debt
+                        // (reserve-backed); above 115% the partial heal is feasible and takes over.
+                        let debt_sats: u64 = coll_at_cr(debt_cents, hi, 200000000);
+                        assert!(jet::le_64(debt_sats, coll));                        // CR >= 100% (not bad-debt)
+                        assert!(jet::le_64(coll, coll_at_cr(debt_cents, hi, 230000000))); // CR <= 115% (partial infeasible)
+                        // the keeper burns the FULL debt into the genuine pot; the vault closes (no recurse).
+                        pot_grows_by(debt);
+                        // route ONE THIRD of the excess (coll - debt_sats) to the reserve, mirroring the
+                        // partial-liq 10:5 keeper:reserve penalty split. excess is in [0, 15% of debt] (CR in
+                        // [100,115]), so reserve = excess/3 in [0, 5% of debt] and the keeper's seizure (coll
+                        // - reserve_fee, unpinned output 0, forced by L-BTC conservation) keeps the other
+                        // 2/3. At CR 115% this is keeper 10% / reserve 5% of debt - CONTINUOUS with a partial
+                        // just above 115% - and it funds the reserve on the one liquidation band that paid it
+                        // nothing before. reserve_fee <= excess, so the keeper's seizure stays >= 0.
+                        let (uf_x, excess): (bool, u64) = jet::subtract_64(coll, debt_sats);
+                        assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(uf_x)), 0)); // coll >= debt_sats (holds by the CR>=100 gate)
+                        stability_grows_by(jet::divide_64(excess, 3));
+                    }
+                    Right(bad_or_rest: Either<(u32, (u32, [Either<(), (u32, Signature)>; 5])), Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), (u32, (u32, [Either<(), (u32, Signature)>; 5]))>>) => {
+                    match bad_or_rest {
+                        Left(bad: (u32, (u32, [Either<(), (u32, Signature)>; 5]))) => {
+                            // BAD-DEBT LIQUIDATION (permissionless, full, CR < 100% at the MAX quote).
+                            // Fresher than last_height (no stale replay); vault closes (no successor).
+                            let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = bad;
+                            let (_lo, hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                            assert!(jet::lt_32(last_height, height));
+                            let debt_cents: u32 = jet::rightmost_64_32(debt);
+                            assert!(jet::lt_64(current_collateral(), coll_at_cr(debt_cents, hi, 200000000)));
+                            pot_grows_by(debt);
+                        }
+                        Right(redeem_or_refresh: Either<(u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))), (u32, (u32, [Either<(), (u32, Signature)>; 5]))>) => {
+                          match redeem_or_refresh {
+                            Left(redeem: (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5])))) => {
+                            // REDEEM (permissionless, the peg floor). Swaps X OBOL for X worth of
+                            // collateral at the MAX quote; recurse to (debt - X, owner) with the same
+                            // last_height (redeem must not advance the ratchet - else a self-redeem
+                            // would dodge liquidation); the tick must be STRICTLY NEWER than last_height.
+                            let (x, tick): (u64, (u32, (u32, [Either<(), (u32, Signature)>; 5]))) = redeem;
+                            let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = tick;
+                            let (_lo, hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                            assert!(jet::lt_32(last_height, height));
+
+                            // X in (0, debt].
+                            assert!(jet::lt_64(0, x));
+                            let (uf_nd, new_debt): (bool, u64) = jet::subtract_64(debt, x);
+                            assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(uf_nd)), 0)); // x <= debt
+                            assert!(jet::lt_64(x, 4294967296)); // x fits in u32 cents so rightmost_64_32 is lossless (H3)
+
+                            pot_grows_by(x);
+                            recurse_to(new_debt, owner, last_height);
+                            let residual_coll: u64 = explicit_output_amount(0);
+
+                            // owner protection: at most X worth of collateral leaves the vault.
+                            let coll: u64 = current_collateral();
+                            let (uf_ex, extraction): (bool, u64) = jet::subtract_64(coll, residual_coll);
+                            assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(uf_ex)), 0)); // residual_coll <= coll
+                            let x_cents: u32 = jet::rightmost_64_32(x);
+                            // backing-ratio floor: value the claim at min(par, backing_ratio). When OBOL is
+                            // under-backed (backing_k < par) the redeemer may extract only its PRO-RATA share
+                            // of collateral, not a full $1 - so redeeming cannot strip par collateral out of an
+                            // under-backed pool and worsen the backing for everyone else. backing_k is co-signed
+                            // by the oracle quorum in the shared tick (it is GLOBAL off-chain data the covenant
+                            // cannot compute per-tx); the same <= 2 Byzantine model that bounds price bounds it.
+                            let floor_k: u32 = jet::min_32(200000000, backing_k);
+                            assert!(jet::le_64(extraction, coll_at_cr(x_cents, hi, floor_k))); // <= X * min(par, backing_ratio)
+
+                            // pin the 0.5% redemption fee into the genuine reserve (V -> S).
+                            stability_grows_by(coll_at_cr(x_cents, hi, 1000000));
+                            }
+                            Right(tick: (u32, (u32, [Either<(), (u32, Signature)>; 5]))) => {
+                                // PERMISSIONLESS REFRESH (M-2): any keeper advances a HEALTHY vault's
+                                // ratchet to a fresher tick (CR >= 130% at the MAX quote), so a dormant
+                                // vault's last_height tracks the tip and a stale dip tick (height <=
+                                // last_height) can no longer be replayed to seize its recovered collateral.
+                                // No owner sig: refresh only ADVANCES last_height and preserves debt+collateral
+                                // (recurse_to pins debt/owner; the collateral may not shrink), and an UNHEALTHY
+                                // vault cannot be refreshed - so a third party can neither harm the vault nor
+                                // let it dodge a genuine liquidation. MAX quote is the exact dual of LIQUIDATE.
+                                let (height, (backing_k, quotes)): (u32, (u32, [Either<(), (u32, Signature)>; 5])) = tick;
+                                let (_lo, hi): (u32, u32) = verify_quorum(height, backing_k, quotes);
+                                assert!(jet::lt_32(last_height, height)); // strictly fresher
+                                let coll: u64 = current_collateral();
+                                let debt_cents: u32 = jet::rightmost_64_32(debt);
+                                assert!(jet::le_64(coll_at_cr(debt_cents, hi, 260000000), coll)); // CR >= 130% at MAX
+                                recurse_to(debt, owner, height);
+                                assert!(jet::le_64(coll, explicit_output_amount(0))); // collateral not reduced
+                            }
+                          }
+                        }
+                    }
+                    }
+                  }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,47 @@
+/*
+ * STYX MULTIVAULT - reserve REPAY leaf.
+ *
+ * OBOL flows back into the shared reserve when a vault is liquidated (the keeper
+ * returns the vault's debt). The reserve may only grow or stay on this leaf, so it
+ * can never be drained here; the vault's LIQUIDATE leaf is what pins the exact amount
+ * returned (reserve_in + that vault's debt). Recurses to output 1.
+ *
+ * The pot sits at input 1 on every inflow path (repay / close / liquidate / redeem / bad-debt), so
+ * this leaf pins current_index == 1 (H4, defense in depth): a second same-address pot input cannot be
+ * co-spent to alias the single output-1 recursion. (Safe even without it - the recursion is grow-only
+ * and the protocol keeps exactly one pot UTXO - but the pin removes the aliasing surface entirely.)
+ *
+ * Param: OBOL_ID.
+ */
+fn explicit_output_amount(idx: u32) -> u64 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (_asset, amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(amount)
+}
+
+fn explicit_output_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+
+fn main() {
+    let obol: u256 = param::OBOL_ID;
+
+    // the pot is always at input 1 on inflow paths; pin it so a second same-address input cannot
+    // alias the single output-1 recursion (H4).
+    assert!(jet::eq_32(jet::current_index(), 1));
+
+    // recurse: the reserve successor is output 1, and must be OBOL
+    assert!(jet::eq_256(jet::current_script_hash(), unwrap(jet::output_script_hash(1))));
+    assert!(jet::eq_256(obol, explicit_output_asset(1)));
+    let reserve_out: u64 = explicit_output_amount(1);
+
+    // reserve input (this input) must be OBOL
+    let (in_asset, in_amount): (Asset1, Amount1) = jet::current_amount();
+    assert!(jet::eq_256(obol, unwrap_right::<(u1, u256)>(in_asset)));
+    let reserve_in: u64 = unwrap_right::<(u1, u256)>(in_amount);
+
+    // inflow only: the reserve may grow or stay, never shrink on this leaf
+    assert!(jet::le_64(reserve_in, reserve_out));
+}

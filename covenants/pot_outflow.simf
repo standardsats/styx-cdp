@@ -1,0 +1,44 @@
+/*
+ * STYX v1 - OBOL pot OUTFLOW leaf.
+ *
+ * The OBOL pot holds the supply and is vault-independent (it reconstructs nobody), so the vault
+ * can pin it by a flat POT_SPK param without a CMR cycle. OBOL leaves the pot only on OPEN and
+ * DRAW, and only when authorized by the issuer - the covenant that reconstructs the vault and
+ * enforces 150% health. This leaf is the gate: it recurses the pot (output 1) and requires the
+ * issuer's unique token to be co-spent at the next input. The issuer (input pot_index + 1) does
+ * the real work (vault genuineness, the released amount, health); this leaf only ensures a
+ * genuine issuer authorized the release, so the pot cannot be drained by a bare spend.
+ *
+ * Tx layout (OPEN): inputs [pot(0), issuer(1), collateral(2)]; (DRAW): [vault(0), pot(1), issuer(2)].
+ * In both the pot successor is output 1 and the issuer is at the input right after the pot.
+ *
+ * Params: OBOL_ID, ISSUER_TOKEN_ID (a 1-unit genesis asset held only by the issuer - a flat
+ * asset id, not a CMR, so this gate adds no covenant dependency).
+ */
+fn explicit_output_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+fn explicit_input_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::input_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+
+fn main() {
+    // this pot input holds OBOL (explicit local check - the issuer reads this input's amount by index
+    // and pins the release against it, so making the asset explicit here removes the reliance on
+    // per-asset conservation to catch a non-OBOL UTXO funded at the public POT_SPK address).
+    let idx: u32 = jet::current_index();
+    assert!(jet::eq_256(param::OBOL_ID, explicit_input_asset(idx)));
+
+    // the issuer (its unique token) must be co-spent at the input right after the pot.
+    let (of, next): (bool, u32) = jet::add_32(idx, 1);
+    assert!(jet::eq_8(jet::left_pad_low_1_8(<bool>::into(of)), 0));
+    assert!(jet::eq_256(param::ISSUER_TOKEN_ID, explicit_input_asset(next)));
+
+    // recurse: the pot successor is output 1, in OBOL. The issuer pins the released amount.
+    assert!(jet::eq_256(jet::current_script_hash(), unwrap(jet::output_script_hash(1))));
+    assert!(jet::eq_256(param::OBOL_ID, explicit_output_asset(1)));
+}

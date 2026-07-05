@@ -1,0 +1,26 @@
+# STYX v1 testnet implementation workspace.
+#
+# Crate graph (the dependency arrows ARE the architecture):
+#   styx-node -> styx-pset -> styx-core
+# styx-core and styx-pset are pure (no node, no IO); elementsd appears only in styx-node.
+#
+# simplicityhl is pinned to the same git rev as the prototype (liquid-styx demos/04-v1-cdp):
+# the prune verdict of `satisfy_with_env` is the test oracle for the whole prune-level tier,
+# so this rev must not float. Bumping it requires re-running the e2e negative spot-checks
+# (prune verdict == node verdict calibration).
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.dependencies]
+simplicityhl = { git = "https://github.com/BlockstreamResearch/SimplicityHL", rev = "63cd0924c44fc2fa0d774ef5083a3123865fb4d0" }
+secp256k1 = { version = "0.29.0", features = ["rand-std"] }
+elementsd = "0.11.0"
+thiserror = "1"
+proptest = "1"
+
+[profile.test]
+# Simplicity compilation and pruning in the prune-level tier are CPU-bound; opt-level 1 keeps
+# the fast tiers fast without hurting build times much.
+opt-level = 1

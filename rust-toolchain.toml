@@ -1,0 +1,5 @@
+# The dependency tree (simplicityhl -> ar_archive_writer, home) needs rustc >= 1.88.
+# Inside `nix develop` the toolchain comes from the flake's nixpkgs pin (1.91) and this file
+# is ignored; it exists for rustup users so a bare checkout builds reproducibly.
+[toolchain]
+channel = "1.91"

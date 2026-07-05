@@ -1,0 +1,118 @@
+/*
+ * STYX v1 - stability reserve covenant (constant-address, issuer-anchored recency).
+ *
+ * The two ops dispatch on a `match` (Simplicity `case` nodes), so the program MUST PRUNE
+ * against the spend env (satisfy_with_env) before encoding, else Elements' Anti-DOS
+ * CHECK_CASE rejects the unpruned program.
+ *
+ * A single covenant holding L-BTC (POLICY) at a CONSTANT taproot address (a single Simplicity leaf,
+ * no data leaf), so every peer can pin it by a flat scriptHash - exactly like the OBOL pot. It has
+ * TWO ops:
+ *   accumulate = Left(())        the liquidate / redeem 5% / 0.5% fee inflow, grow-only, recurse to self
+ *   bad-debt   = Right(())       release the issuer-authored shortfall (CR < 100%), recurse to self
+ *
+ * WHY NO PER-RESERVE RECENCY RATCHET (the old `last_height` data leaf is gone): bad-debt is
+ * ISSUER-ATTESTED (audit finding B). The reserve cannot reconstruct a vault (a CMR cycle, since V
+ * already reconstructs S), so it GATES on the issuer's unique token at input 4 and DEFERS the shrink
+ * amount to the issuer's BAD-DEBT-ATTEST arm, which reconstructs the genuine underwater vault, sizes
+ * the shortfall at the MAX quote, and authors output 2. The issuer arm ALSO carries the recency: it
+ * verifies the tick and gates `le_32(last_mint_height, height)` against its GLOBAL mint anchor
+ * (advanced on every open / draw / poke / attest). That global anchor subsumes the reserve's old
+ * per-reserve ratchet (it is advanced by all mint traffic, so it is weakly fresher, and monotone), so
+ * a stale-tick bad-debt drain is blocked by the SAME keeper-poke-liveness model - now keepers poke the
+ * ISSUER (via its poke) rather than the reserve. Making the address constant also closes the fee
+ * griefing where a keeper routed the 5% / 0.5% fee into a sybil reserve UTXO at an arbitrary (even
+ * u32::MAX, bad-debt-proof) last_height: there is now exactly one reserve scriptHash.
+ *
+ * The fee inflow needs no freshness of its own: it is grow-only, and the 5% / 0.5% AMOUNT is priced
+ * by the VAULT's liquidate / redeem branch under the VAULT's own last_height ratchet.
+ *
+ * Params: POT_SPK (the genuine pot's scriptHash - bad-debt requires the repaid debt to land there),
+ * ISSUER_TOKEN_ID (the bad-debt issuer-attest gate, a flat asset id), OBOL_ID, POLICY. Witness: OP.
+ */
+fn explicit_output_amount(idx: u32) -> u64 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (_asset, amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(amount)
+}
+fn explicit_output_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::output_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+fn explicit_input_asset(idx: u32) -> u256 {
+    let pair: (Asset1, Amount1) = unwrap(jet::input_amount(idx));
+    let (asset, _amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(asset)
+}
+fn explicit_input_amount(idx: u32) -> u64 {
+    let pair: (Asset1, Amount1) = unwrap(jet::input_amount(idx));
+    let (_asset, amount): (Asset1, Amount1) = pair;
+    unwrap_right::<(u1, u256)>(amount)
+}
+fn current_balance() -> u64 {
+    let (_c_asset, c_amount): (Asset1, Amount1) = jet::current_amount();
+    unwrap_right::<(u1, u256)>(c_amount)
+}
+
+fn main() {
+    // this reserve input holds L-BTC (explicit local check - both arms read current_balance by amount
+    // and peers pin this input by index, so making the asset explicit here removes the reliance on
+    // per-asset conservation to catch a non-POLICY UTXO funded at the public STABILITY_SPK address).
+    let (c_asset, _c_amount): (Asset1, Amount1) = jet::current_amount();
+    assert!(jet::eq_256(param::POLICY, unwrap_right::<(u1, u256)>(c_asset)));
+
+    // OP = accumulate | bad-debt. The address is constant (no data leaf), so the reserve recurses to
+    // its OWN scriptHash (jet::current_script_hash) on both arms - no self-reconstruction needed.
+    let op: Either<(), ()> = witness::OP;
+    match op {
+        Left(_accumulate: ()) => {
+            // ACCUMULATE: the liquidate / redeem fee inflow. Grow-only, recurse to output 3 at the
+            // SAME (constant) address; the exact 5% / 0.5% share is pinned by the vault. The reserve
+            // sits at input 3 on both fee paths, so pin current_index == 3 (H4) so a second
+            // same-address input cannot alias the single output-3 recursion.
+            assert!(jet::eq_32(jet::current_index(), 3));
+            assert!(jet::eq_256(jet::current_script_hash(), unwrap(jet::output_script_hash(3))));
+            assert!(jet::eq_256(param::POLICY, explicit_output_asset(3)));
+            assert!(jet::le_64(current_balance(), explicit_output_amount(3))); // grow-only
+        }
+        Right(_baddebt: ()) => {
+            // BAD-DEBT (issuer-attested; closes audit finding B). The reserve GATES on the issuer's
+            // unique token being co-spent (input 4) and DEFERS the shrink amount to the issuer's
+            // ATTEST arm, which reconstructs the genuine underwater vault, sizes the shortfall, and
+            // authors output 2. Here the reserve only self-defends: a fixed input index, the POT_SPK
+            // pins (defense in depth), own-address recursion, and a downward balance check. Recency
+            // lives on the issuer's global mint anchor (le_32(last_mint_height, height)).
+            // Tx layout: inputs [vault(0), pot(1), keeper OBOL(2), reserve(this, 3), issuer(4), fee(5)].
+
+            // the reserve sits at a FIXED input index, so two reserve inputs cannot alias one shrink
+            // output (the latent aliasing gap the audit flagged on the reserve arms).
+            assert!(jet::eq_32(jet::current_index(), 3));
+
+            // the issuer token MUST be co-spent at input 4. Together with the pot-GROWTH check below
+            // this forces the issuer's ATTEST arm into the tx: poke is pinned to input 0 (cannot sit at
+            // 4); open/draw require the pot to move OBOL out (principal/d > 0), and their pot pin reads
+            // current_index-1, so at input 4 they would read input 3 = THIS reserve (not POT_SPK) and
+            // reject. Only ATTEST reconstructs the genuine vault, GROWS the pot by the full debt, and
+            // authors this reserve's output-2 amount.
+            assert!(jet::eq_256(param::ISSUER_TOKEN_ID, explicit_input_asset(4)));
+
+            // the repaid debt is genuinely burned into the real pot (input1/output1 == POT_SPK + OBOL),
+            // and the pot must STRICTLY GROW. Among the issuer arms only ATTEST grows the pot (open/draw
+            // shrink or keep it, poke never touches it), so requiring growth independently forces ATTEST
+            // and rejects a non-authoring issuer arm (e.g. a d==0 draw) that leaves the pot unchanged -
+            // an amount-unpinned reserve drain. This does not rely on the index-adjacency argument.
+            assert!(jet::eq_256(param::POT_SPK, unwrap(jet::input_script_hash(1))));
+            assert!(jet::eq_256(param::POT_SPK, unwrap(jet::output_script_hash(1))));
+            assert!(jet::eq_256(param::OBOL_ID, explicit_input_asset(1)));
+            assert!(jet::eq_256(param::OBOL_ID, explicit_output_asset(1)));
+            assert!(jet::lt_64(explicit_input_amount(1), explicit_output_amount(1))); // pot strictly grows (only ATTEST does)
+
+            // recurse to output 2 at the SAME (constant) address; the EXACT shrink is authored by the
+            // issuer. Here we only self-defend that the balance does not grow.
+            assert!(jet::eq_256(jet::current_script_hash(), unwrap(jet::output_script_hash(2))));
+            assert!(jet::eq_256(param::POLICY, explicit_output_asset(2)));
+            assert!(jet::le_64(explicit_output_amount(2), current_balance())); // downward self-defense
+        }
+    }
+}

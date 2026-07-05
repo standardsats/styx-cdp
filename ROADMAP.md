@@ -35,8 +35,12 @@ green. Statuses: [ ] planned, [x] done.
   refresh, refresh-as-draw drain (M-2), wrong owner key. Known follow-up: the matrix
   scenarios for these four ops still hand-build their layouts; fold them onto the builders
   when M7 promotes the liquidation scenarios.
-- [ ] **M7 - liquidations.** Partial (heal band, fee split, sybil-reserve), full-liq (band
-  gates), bad-debt (attest, fake vault, no-issuer, wrong reserve index, recap bypass, 20% cap).
+- [x] **M7 - liquidations.** Partial / full-liq / bad-debt as checked builders
+  (`bad_debt_reserve_pay` joins the math core); the matrix scenarios now run through the
+  builders (golden digests unchanged), only REDEEM stays hand-built until M8. Probes: stale
+  tick, under/over-heal, short stability fee, sybil reserve, full-liq band gates, stale vs
+  issuer anchor, fake vault at input 0 (finding B), no issuer co-spend, reserve at the wrong
+  index, recap bypass, the 20% cap (M-1).
 - [ ] **M8 - REDEEM + remaining probes.** Backing-ratio floor, poke index guard, zero price,
   d=0 drain, decoy pot, asset confusion, second-vault alias. Full probe inventory mapped to
   covenant gates and audit finding ids.

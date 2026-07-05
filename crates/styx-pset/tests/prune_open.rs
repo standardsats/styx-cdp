@@ -97,7 +97,7 @@ fn open_rejects_zero_principal() {
     let d = TestDeploy::get();
     let state = protocol_state(100_000_000, 1_000_000, 100);
     let intent = open_intent(d.tick(120, 120_000), Obol::ZERO);
-    assert!(matches!(open(&d.ctx, &state, &intent), Err(BuildError::ZeroPrincipal)));
+    assert!(matches!(open(&d.ctx, &state, &intent), Err(BuildError::ZeroAmount)));
 
     let built = open_unchecked(&d.ctx, &state, &intent, Sats::ZERO);
     assert!(!slot_verdict(d, &built.plan, 1), "issuer zero-principal gate must reject");

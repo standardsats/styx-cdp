@@ -44,6 +44,20 @@ pub fn coll_at_cr_obol(debt: Obol, price: Price, k: RatioK) -> Result<Sats, crat
     Ok(coll_at_cr(debt.covenant_cents()?, price, k))
 }
 
+/// The reserve's bad-debt payout: min(shortfall + 5% bounty, the 20% per-vault cap (M-1),
+/// the reserve balance) - the reserve pays what it can, partially if it must (E-2).
+/// Port of the issuer attest arm's sizing (issuer.simf:451-471).
+pub fn bad_debt_reserve_pay(debt_cents: u32, price: Price, coll: Sats, reserve: Sats) -> Sats {
+    let debt_sats = coll_at_cr(debt_cents, price, crate::consts::K_PAR);
+    let shortfall = debt_sats.raw().saturating_sub(coll.raw());
+    let bounty = coll_at_cr(debt_cents, price, crate::consts::K_RESERVE_SHARE).raw();
+    let cap = coll_at_cr(debt_cents, price, crate::consts::K_BAD_DEBT_CAP).raw();
+    // saturating_add where the covenant asserts on overflow: both terms are coll_at_cr
+    // results over the u32 debt domain (< 2^33 each), so the sum cannot saturate; the two
+    // behaviours coincide on the reachable domain.
+    Sats::new(shortfall.saturating_add(bounty).min(cap).min(reserve.raw()))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

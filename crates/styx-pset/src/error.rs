@@ -17,10 +17,12 @@ pub enum BuildError {
     /// A quote carries a zero price; the covenants reject it at the quorum layer.
     #[error("zero price in the oracle tick")]
     ZeroPrice,
-    /// A zero mint. The issuer forbids it (issuer.simf:264): a zero-principal OPEN would let
-    /// the pot be spent through the inflow leaf without the token gate.
-    #[error("zero principal")]
-    ZeroPrincipal,
+    /// A zero op amount (open principal, draw amount, liquidate dd). The covenants assert
+    /// each is positive: a zero-principal OPEN would let the pot be spent through the inflow
+    /// leaf without the token gate (issuer.simf:264), and the vault's partial arm requires
+    /// 0 < dd (vault.simf:324).
+    #[error("zero amount")]
+    ZeroAmount,
     /// Collateral below the covenant's CR gate for this operation.
     #[error("undercollateralized: need {} sats, have {}", need.raw(), have.raw())]
     Undercollateralized { need: Sats, have: Sats },
@@ -34,6 +36,25 @@ pub enum BuildError {
     /// layouts).
     #[error("funding mismatch: need exactly {} sats, have {}", need.raw(), have.raw())]
     FundingMismatch { need: Sats, have: Sats },
+    /// A partial liquidation must leave a residual debt (vault.simf:327 asserts
+    /// 0 < residual_debt); a full repayment is FULL-LIQ's job.
+    #[error("dd {} leaves no residual debt (use full-liq for {})", dd.raw(), debt.raw())]
+    NotPartial { dd: Obol, debt: Obol },
+    /// The vault sits at or above the 130% gate: partial liquidation is closed.
+    #[error("vault too healthy: collateral {} is not below the {} sat gate", have.raw(), gate.raw())]
+    VaultTooHealthy { gate: Sats, have: Sats },
+    /// The residual collateral misses the [132%, 137%] heal band.
+    #[error("residual {} outside the heal band [{}, {}]", residual.raw(), lo.raw(), hi.raw())]
+    HealOutOfBand { residual: Sats, lo: Sats, hi: Sats },
+    /// The keeper extraction exceeds the 1.15 x dd cap.
+    #[error("extraction {} exceeds the cap {}", extraction.raw(), cap.raw())]
+    ExtractionExceedsCap { extraction: Sats, cap: Sats },
+    /// The vault CR is outside this op's band (full-liq needs [100%, 115%]).
+    #[error("collateral {} outside the band [{}, {}]", coll.raw(), floor.raw(), cap.raw())]
+    CrOutOfBand { coll: Sats, floor: Sats, cap: Sats },
+    /// Bad-debt needs CR < 100%: the collateral still covers the debt.
+    #[error("not underwater: collateral {} covers the debt's {} sats", coll.raw(), debt_sats.raw())]
+    NotUnderwater { debt_sats: Sats, coll: Sats },
     /// The OBOL payer coin cannot cover the repayment.
     #[error("insufficient payer: need {} OBOL units, have {}", need.raw(), have.raw())]
     InsufficientPayer { need: Obol, have: Obol },

@@ -41,7 +41,7 @@ pub fn open(
     // A zero mint is forbidden by the issuer (issuer.simf:264) - it would open a pot drain
     // through the inflow leaf.
     if intent.principal == Obol::ZERO {
-        return Err(BuildError::ZeroPrincipal);
+        return Err(BuildError::ZeroAmount);
     }
     let (lo, _) = intent.tick.price_range();
     let debt_cents = intent.principal.covenant_cents()?;

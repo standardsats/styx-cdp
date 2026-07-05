@@ -35,7 +35,7 @@ pub fn draw(
     super::check_tick(&intent.tick, protocol.issuer.state.last_mint_height)?;
     super::check_vault_ratchet(&intent.tick, vault.state.last_height)?;
     if intent.amount == Obol::ZERO {
-        return Err(BuildError::ZeroPrincipal);
+        return Err(BuildError::ZeroAmount);
     }
     if vault.value <= intent.fee {
         return Err(BuildError::InsufficientFunding { need: intent.fee, have: vault.value });

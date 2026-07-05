@@ -2,8 +2,11 @@
 //! would reject, with the numbers) and an unchecked constructor used by the negative test
 //! tier, where the covenant itself is the judge.
 
+pub mod bad_debt;
 pub mod close;
 pub mod draw;
+pub mod full_liq;
+pub mod liquidate;
 pub mod open;
 pub mod poke;
 pub mod refresh;
@@ -36,7 +39,10 @@ pub(crate) fn check_tick(tick: &OracleTick, anchor: BlockHeight) -> Result<(), B
 
 /// The vault's freshness ratchet is strict: DRAW and REFRESH need a tick strictly newer than
 /// the vault's last_height.
-pub(crate) fn check_vault_ratchet(tick: &OracleTick, last_height: BlockHeight) -> Result<(), BuildError> {
+pub(crate) fn check_vault_ratchet(
+    tick: &OracleTick,
+    last_height: BlockHeight,
+) -> Result<(), BuildError> {
     if tick.height() <= last_height {
         return Err(BuildError::RatchetNotAdvanced { tick: tick.height(), last_height });
     }

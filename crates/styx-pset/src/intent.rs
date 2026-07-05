@@ -90,3 +90,42 @@ pub struct RefreshIntent {
     pub change_spk: Script,
     pub fee: Sats,
 }
+
+/// Partial LIQUIDATE: repay `dd`, heal the vault to `residual` collateral (inside the
+/// [132%, 137%] band at the max quote), seize the rest less the 5% reserve share and the fee.
+#[derive(Debug, Clone)]
+pub struct LiquidateIntent {
+    pub dd: Obol,
+    pub residual: Sats,
+    pub keeper: ObolCoin,
+    pub keeper_spk: Script,
+    pub obol_change_spk: Script,
+    pub tick: OracleTick,
+    pub fee: Sats,
+}
+
+/// FULL-LIQ: repay the full debt in the [100%, 115%] band, seize the collateral less one
+/// third of the excess (to the reserve) and the fee. The keeper coin must exceed the debt:
+/// the positive OBOL change output is the E-5 anchor.
+#[derive(Debug, Clone)]
+pub struct FullLiqIntent {
+    pub keeper: ObolCoin,
+    pub keeper_spk: Script,
+    pub obol_change_spk: Script,
+    pub tick: OracleTick,
+    pub fee: Sats,
+}
+
+/// BAD-DEBT (issuer-attested): repay the full debt of an underwater vault (CR < 100%); the
+/// reserve covers the shortfall plus the 5% bounty, capped at 20% of the debt (M-1) and at
+/// its balance (E-2). The tx fee comes from a separate coin.
+#[derive(Debug, Clone)]
+pub struct BadDebtIntent {
+    pub keeper: ObolCoin,
+    pub keeper_spk: Script,
+    pub obol_change_spk: Script,
+    pub fee_coin: FundingCoin,
+    pub change_spk: Script,
+    pub tick: OracleTick,
+    pub fee: Sats,
+}

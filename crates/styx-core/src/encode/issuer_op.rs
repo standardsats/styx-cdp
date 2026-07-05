@@ -51,9 +51,7 @@ pub enum IssuerOp {
 pub fn lower_issuer_op(op: &IssuerOp) -> IssuerOpSum {
     use Either::{Left, Right};
     match op {
-        IssuerOp::Open { principal, owner, tick } => {
-            Left((principal.raw(), (*owner, lower_tick(tick))))
-        }
+        IssuerOp::Open { principal, owner, tick } => Left((principal.raw(), (*owner, lower_tick(tick)))),
         IssuerOp::Draw { old_debt, owner, old_last_height, new_debt, draw_height } => Right(Left((
             old_debt.raw(),
             (*owner, (old_last_height.raw(), (new_debt.raw(), draw_height.raw()))),

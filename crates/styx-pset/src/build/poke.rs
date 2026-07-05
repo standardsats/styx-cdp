@@ -30,10 +30,7 @@ pub fn poke(
     super::check_tick(&intent.tick, issuer.state.last_mint_height)?;
     // Strict: the change output must be positive, or the tx is dust-nonstandard.
     if intent.funding.value <= intent.fee {
-        return Err(BuildError::InsufficientFunding {
-            need: intent.fee,
-            have: intent.funding.value,
-        });
+        return Err(BuildError::InsufficientFunding { need: intent.fee, have: intent.funding.value });
     }
     Ok(poke_unchecked(ctx, issuer, intent))
 }

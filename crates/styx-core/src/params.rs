@@ -47,11 +47,8 @@ impl Params {
                 }
             }
         }
-        let assets = [
-            ("OBOL_ID", self.obol),
-            ("ISSUER_TOKEN_ID", self.issuer_token),
-            ("POLICY", self.policy),
-        ];
+        let assets =
+            [("OBOL_ID", self.obol), ("ISSUER_TOKEN_ID", self.issuer_token), ("POLICY", self.policy)];
         for i in 0..assets.len() {
             for j in (i + 1)..assets.len() {
                 if assets[i].1 == assets[j].1 {

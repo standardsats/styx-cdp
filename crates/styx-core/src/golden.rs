@@ -54,11 +54,9 @@ fn cmrs() -> &'static [(&'static str, String)] {
 
 fn compute_cmrs() -> Vec<(&'static str, String)> {
     let rr = compile(Covenant::ReserveRepay, args(vec![w("OBOL_ID", d(0x01))])).expect("reserve_repay");
-    let po = compile(
-        Covenant::PotOutflow,
-        args(vec![w("OBOL_ID", d(0x01)), w("ISSUER_TOKEN_ID", d(0x02))]),
-    )
-    .expect("pot_outflow");
+    let po =
+        compile(Covenant::PotOutflow, args(vec![w("OBOL_ID", d(0x01)), w("ISSUER_TOKEN_ID", d(0x02))]))
+            .expect("pot_outflow");
     let st = compile(
         Covenant::Stability,
         args(vec![

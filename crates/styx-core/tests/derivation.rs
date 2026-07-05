@@ -23,16 +23,10 @@ use styx_core::units::{BlockHeight, Obol};
 fn vault_data_leaf_bytes_golden() {
     // OP_RETURN || debt(8 BE) || owner(32) || last_height(4 BE) = 45 bytes.
     let owner = nums_key();
-    let state = VaultState {
-        debt: Obol::new(0x0102030405060708),
-        owner,
-        last_height: BlockHeight::new(1234),
-    };
+    let state =
+        VaultState { debt: Obol::new(0x0102030405060708), owner, last_height: BlockHeight::new(1234) };
     let (script, _ver) = vault_data_leaf(&state);
-    assert_eq!(
-        hex(script.as_bytes()),
-        format!("6a0102030405060708{INTERNAL_KEY_HEX}000004d2")
-    );
+    assert_eq!(hex(script.as_bytes()), format!("6a0102030405060708{INTERNAL_KEY_HEX}000004d2"));
     assert_eq!(script.len(), 45);
 }
 
@@ -102,11 +96,8 @@ fn vault_cmr_golden() {
 
 #[test]
 fn vault_spk_golden() {
-    let state = VaultState {
-        debt: Obol::new(5_000_000),
-        owner: nums_key(),
-        last_height: BlockHeight::new(100),
-    };
+    let state =
+        VaultState { debt: Obol::new(5_000_000), owner: nums_key(), last_height: BlockHeight::new(100) };
     assert_eq!(hex(test_artifacts().vault_spk(&state).as_bytes()), VAULT_SPK);
 }
 
@@ -119,11 +110,8 @@ fn issuer_spk_golden() {
 #[test]
 fn vault_spk_commits_to_every_state_field() {
     let a = test_artifacts();
-    let base = VaultState {
-        debt: Obol::new(5_000_000),
-        owner: nums_key(),
-        last_height: BlockHeight::new(100),
-    };
+    let base =
+        VaultState { debt: Obol::new(5_000_000), owner: nums_key(), last_height: BlockHeight::new(100) };
     let spk = a.vault_spk(&base);
     assert_ne!(spk, a.vault_spk(&VaultState { debt: Obol::new(5_000_001), ..base }));
     assert_ne!(spk, a.vault_spk(&VaultState { last_height: BlockHeight::new(101), ..base }));

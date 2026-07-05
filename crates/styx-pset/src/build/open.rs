@@ -51,16 +51,10 @@ pub fn open(
         return Err(BuildError::Undercollateralized { need: need_coll, have: intent.collateral });
     }
     if intent.principal > protocol.pot.value {
-        return Err(BuildError::InsufficientPot {
-            need: intent.principal,
-            have: protocol.pot.value,
-        });
+        return Err(BuildError::InsufficientPot { need: intent.principal, have: protocol.pot.value });
     }
     let borrow_fee = coll_at_cr(debt_cents, lo, K_FEE_HALF_PERCENT);
-    let need_funding = intent
-        .collateral
-        .checked_add(borrow_fee)?
-        .checked_add(intent.fee)?;
+    let need_funding = intent.collateral.checked_add(borrow_fee)?.checked_add(intent.fee)?;
     if intent.funding.value != need_funding {
         return Err(BuildError::FundingMismatch { need: need_funding, have: intent.funding.value });
     }
@@ -76,11 +70,8 @@ pub fn open_unchecked(
 ) -> Built<OpenDelta> {
     let a = &ctx.artifacts;
     let p = &ctx.params;
-    let vault = VaultState {
-        debt: intent.principal,
-        owner: intent.owner,
-        last_height: intent.tick.height(),
-    };
+    let vault =
+        VaultState { debt: intent.principal, owner: intent.owner, last_height: intent.tick.height() };
     let issuer_successor = IssuerState { last_mint_height: intent.tick.height() };
     let pot_out = protocol.pot.value.raw().saturating_sub(intent.principal.raw());
     let reserve_out = protocol.reserve.value.raw().saturating_add(borrow_fee.raw());

@@ -60,10 +60,7 @@ fn issuer_witness_types_match() {
     let template = styx_core::artifacts::template(styx_core::artifacts::Covenant::Issuer).unwrap();
     let types = template.witness_types();
     assert_eq!(types.get(&WitnessName::from_str_unchecked("OP")), Some(&IssuerOpSum::ty()));
-    assert_eq!(
-        types.get(&WitnessName::from_str_unchecked("LAST_MINT_HEIGHT")),
-        Some(&u32::ty())
-    );
+    assert_eq!(types.get(&WitnessName::from_str_unchecked("LAST_MINT_HEIGHT")), Some(&u32::ty()));
 }
 
 #[test]

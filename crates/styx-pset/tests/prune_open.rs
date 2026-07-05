@@ -70,10 +70,7 @@ fn open_builder_refuses_undercollateralized() {
     let state = protocol_state(100_000_000, 1_000_000, 100);
     let mut intent = open_intent(d.tick(120, 120_000), Obol::new(5_000_000));
     intent.collateral = Sats::new(intent.collateral.raw() - 1); // one sat under 150%
-    assert!(matches!(
-        open(&d.ctx, &state, &intent),
-        Err(BuildError::Undercollateralized { .. })
-    ));
+    assert!(matches!(open(&d.ctx, &state, &intent), Err(BuildError::Undercollateralized { .. })));
 }
 
 #[test]

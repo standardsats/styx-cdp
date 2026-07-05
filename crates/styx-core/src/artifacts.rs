@@ -84,9 +84,8 @@ pub struct CompileError {
 
 /// Compile a frozen covenant against the given per-deploy params.
 pub fn compile(cov: Covenant, args: Arguments) -> Result<CompiledProgram, CompileError> {
-    CompiledProgram::new(cov.source(), args, false, Box::new(ElementsJetHinter::new())).map_err(|e| {
-        CompileError { covenant: cov.name(), message: e.to_string() }
-    })
+    CompiledProgram::new(cov.source(), args, false, Box::new(ElementsJetHinter::new()))
+        .map_err(|e| CompileError { covenant: cov.name(), message: e.to_string() })
 }
 
 /// Parse a frozen covenant without instantiating params. Exposes what `CompiledProgram` does
@@ -146,7 +145,8 @@ impl Artifacts {
         let token = asset_u256(params.issuer_token);
         let policy = asset_u256(params.policy);
 
-        let reserve_repay = compile(Covenant::ReserveRepay, args(vec![w("OBOL_ID", Value::u256(obol))]))?;
+        let reserve_repay =
+            compile(Covenant::ReserveRepay, args(vec![w("OBOL_ID", Value::u256(obol))]))?;
         let pot_outflow = compile(
             Covenant::PotOutflow,
             args(vec![w("OBOL_ID", Value::u256(obol)), w("ISSUER_TOKEN_ID", Value::u256(token))]),
@@ -256,7 +256,11 @@ impl Artifacts {
         p2tr_spk(&self.issuer_spend_info(state))
     }
     pub fn issuer_control_block(&self, state: &IssuerState) -> ControlBlock {
-        control_block(&self.issuer_spend_info(state), cmr_script(&self.issuer), simplicity::leaf_version())
+        control_block(
+            &self.issuer_spend_info(state),
+            cmr_script(&self.issuer),
+            simplicity::leaf_version(),
+        )
     }
 }
 

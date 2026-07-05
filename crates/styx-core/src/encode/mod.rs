@@ -28,11 +28,9 @@ pub type Tick = (u32, (u32, [Slot; 5]));
 
 /// Place the tick's three quotes into their slots; the other two slots are absent.
 pub fn lower_tick(tick: &OracleTick) -> Tick {
-    let slots = tick
-        .slots()
-        .map(|s| match s {
-            None => Either::Left(()),
-            Some(q) => Either::Right((q.price.raw(), Sig(q.sig))),
-        });
+    let slots = tick.slots().map(|s| match s {
+        None => Either::Left(()),
+        Some(q) => Either::Right((q.price.raw(), Sig(q.sig))),
+    });
     (tick.height().raw(), (tick.backing_k().raw(), slots))
 }

@@ -19,10 +19,8 @@ use simplicityhl::Value;
 pub type OwnerKind = Either<(), Either<u64, (u64, Tick)>>;
 
 /// The full OP sum, structurally identical to the covenant's witness type.
-pub type VaultOpSum = Either<
-    (Sig, OwnerKind),
-    Either<(u64, Tick), Either<Tick, Either<Tick, Either<(u64, Tick), Tick>>>>,
->;
+pub type VaultOpSum =
+    Either<(Sig, OwnerKind), Either<(u64, Tick), Either<Tick, Either<Tick, Either<(u64, Tick), Tick>>>>>;
 
 /// One vault operation. Owner ops carry the signature as data: encoding is separate from
 /// signing, which the PSET pipeline needs (the sighash exists only once the tx body is fixed).

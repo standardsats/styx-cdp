@@ -55,14 +55,10 @@ impl TestDeploy {
     }
 
     pub fn tick_bk(&self, height: u32, price: u32, backing_k: RatioK) -> OracleTick {
-        let payload = TickPayload {
-            height: BlockHeight::new(height),
-            price: Price::new(price),
-            backing_k,
-        };
-        let quotes = [0u8, 1, 2].map(|i| {
-            (OracleSlot::new(i).unwrap(), sign_quote(&self.oracle_keys[i as usize], &payload))
-        });
+        let payload =
+            TickPayload { height: BlockHeight::new(height), price: Price::new(price), backing_k };
+        let quotes = [0u8, 1, 2]
+            .map(|i| (OracleSlot::new(i).unwrap(), sign_quote(&self.oracle_keys[i as usize], &payload)));
         OracleTick::new(payload.height, backing_k, quotes).unwrap()
     }
 }

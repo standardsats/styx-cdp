@@ -80,7 +80,12 @@ fn witness_values(pairs: Vec<(&str, Value)>) -> WitnessValues {
     )
 }
 
-fn stack(prog: &CompiledProgram, program_bytes: Vec<u8>, witness_bytes: Vec<u8>, cb: ControlBlock) -> Vec<Vec<u8>> {
+fn stack(
+    prog: &CompiledProgram,
+    program_bytes: Vec<u8>,
+    witness_bytes: Vec<u8>,
+    cb: ControlBlock,
+) -> Vec<Vec<u8>> {
     vec![witness_bytes, program_bytes, cmr_script(prog).into_bytes(), cb.serialize()]
 }
 
@@ -90,9 +95,11 @@ fn leaf_witness(
     input: u32,
     covenant: &'static str,
 ) -> Result<Vec<Vec<u8>>, PruneRejected> {
-    let satisfied = prog
-        .satisfy(WitnessValues::default())
-        .map_err(|message| PruneRejected { input, covenant, message })?;
+    let satisfied = prog.satisfy(WitnessValues::default()).map_err(|message| PruneRejected {
+        input,
+        covenant,
+        message,
+    })?;
     let (program_bytes, witness_bytes) = satisfied.redeem().to_vec_with_witness();
     Ok(stack(prog, program_bytes, witness_bytes, cb))
 }
@@ -117,9 +124,11 @@ fn pruned_witness(
         None,
         ctx.genesis,
     );
-    let pruned = prog
-        .satisfy_with_env(wv, Some(&env))
-        .map_err(|e| PruneRejected { input, covenant, message: e.to_string() })?;
+    let pruned = prog.satisfy_with_env(wv, Some(&env)).map_err(|e| PruneRejected {
+        input,
+        covenant,
+        message: e.to_string(),
+    })?;
     let (program_bytes, witness_bytes) = pruned.redeem().to_vec_with_witness();
     Ok(stack(prog, program_bytes, witness_bytes, cb))
 }

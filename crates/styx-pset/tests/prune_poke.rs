@@ -25,10 +25,7 @@ fn poke_builder_refuses_a_stale_tick() {
     let d = TestDeploy::get();
     let state = protocol_state(100_000_000, 0, 100);
     let intent = poke_intent(d.tick(90, 120_000));
-    assert!(matches!(
-        poke(&d.ctx, &state.issuer, &intent),
-        Err(BuildError::StaleTick { .. })
-    ));
+    assert!(matches!(poke(&d.ctx, &state.issuer, &intent), Err(BuildError::StaleTick { .. })));
 }
 
 #[test]
@@ -60,8 +57,5 @@ fn poke_builder_refuses_underfunded_fee() {
     let mut intent = poke_intent(d.tick(120, 120_000));
     intent.funding.value = Sats::new(FEE.raw());
     intent.funding.spk = op_true_spk();
-    assert!(matches!(
-        poke(&d.ctx, &state.issuer, &intent),
-        Err(BuildError::InsufficientFunding { .. })
-    ));
+    assert!(matches!(poke(&d.ctx, &state.issuer, &intent), Err(BuildError::InsufficientFunding { .. })));
 }

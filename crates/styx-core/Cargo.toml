@@ -8,3 +8,6 @@ description = "STYX v1 pure protocol layer: units, math, frozen covenant artifac
 [dependencies]
 simplicityhl = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -46,8 +46,11 @@ green. Statuses: [ ] planned, [x] done.
   now builder-backed. Probes: par extraction under an under-backed tick (E-2 tail), poke and
   vault index guards, zero price, d=0 drain (Hole A), decoy pot (Hole B), non-OBOL pot. The
   full inventory is mapped to covenant gates and audit finding ids in tests/probes.rs.
-- [ ] **M9 - math parity properties.** Verbatim covenant shim for `coll_at_cr` (with an
-  anti-drift source check), proptest exact-value parity, heal-band edge tightness.
+- [x] **M9 - math parity properties.** The covenant's coll_at_cr pasted verbatim into a shim
+  program (source-locked against the frozen vault.simf); 1024 proptest cases prove exact
+  equality (the Rust value is accepted, the value plus one is not) across the u32 domain
+  and the protocol k literals; 64 end-to-end cases prove the heal-band edges are one-sat
+  tight through the liquidate builder.
 - [ ] **M10 - PSET invariants.** Golden PSETs, finalize == raw tx, blinded-output and
   fragmented-state refusals, E-5 keeper payout binding (SIGHASH_ALL, redirect test).
 - [ ] **M11 - node adapter + e2e.** Protocol scanner (single-UTXO enforcement), broadcast with

@@ -56,3 +56,17 @@ pub fn lower_vault_op(op: &VaultOp) -> VaultOpSum {
 pub fn vault_op_value(op: &VaultOp) -> Value {
     lower_vault_op(op).value()
 }
+
+impl VaultOp {
+    /// The same op with the owner signature installed; permissionless ops are unchanged.
+    /// Builders emit owner ops with a placeholder signature, and `styx-pset`'s `owner_sign`
+    /// completes them once the transaction body (and so the sighash) is fixed.
+    pub fn with_owner_sig(self, sig: Sig) -> VaultOp {
+        match self {
+            VaultOp::Close { .. } => VaultOp::Close { owner_sig: sig },
+            VaultOp::Repay { amount, .. } => VaultOp::Repay { owner_sig: sig, amount },
+            VaultOp::Draw { amount, tick, .. } => VaultOp::Draw { owner_sig: sig, amount, tick },
+            other => other,
+        }
+    }
+}

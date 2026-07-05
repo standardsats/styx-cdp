@@ -46,7 +46,8 @@ enum V {
     Redeem,
     Refresh,
 }
-const VOPS: [V; 8] = [V::Close, V::Repay, V::Draw, V::Liquidate, V::FullLiq, V::BadDebt, V::Redeem, V::Refresh];
+const VOPS: [V; 8] =
+    [V::Close, V::Repay, V::Draw, V::Liquidate, V::FullLiq, V::BadDebt, V::Redeem, V::Refresh];
 
 fn scenario(v: V) -> Scenario {
     let d = TestDeploy::get();
@@ -132,7 +133,8 @@ fn vault_pruned_witness_digests_golden() {
         let s = scenario(*v);
         let tx = finalize(&d.ctx, &s.plan).expect("accepts");
         let w = &tx.input[0].witness.script_witness;
-        let digest = hex(&sha256::Hash::hash(&[w[0].as_slice(), w[1].as_slice()].concat()).to_byte_array());
+        let digest =
+            hex(&sha256::Hash::hash(&[w[0].as_slice(), w[1].as_slice()].concat()).to_byte_array());
         if digest != expected {
             mismatches.push(format!("(\"{name}\", \"{digest}\"),"));
         }
@@ -179,12 +181,9 @@ fn issuer_op_for(i: I, e: &IEnv) -> IssuerOp {
             draw_height: e.tick.height(),
         },
         I::Poke => IssuerOp::Poke { tick: e.tick.clone() },
-        I::Attest => IssuerOp::Attest {
-            debt: e.vault_debt,
-            owner,
-            last_height: e.vault_lh,
-            tick: e.tick.clone(),
-        },
+        I::Attest => {
+            IssuerOp::Attest { debt: e.vault_debt, owner, last_height: e.vault_lh, tick: e.tick.clone() }
+        }
     }
 }
 
@@ -194,7 +193,8 @@ fn issuer_env(j: I) -> IEnv {
         I::Open => {
             let state = protocol_state(100_000_000, 1_000_000, 100);
             let tick = d.tick(120, 120_000);
-            let built = open(&d.ctx, &state, &open_intent(tick.clone(), Obol::new(5_000_000))).expect("builds");
+            let built =
+                open(&d.ctx, &state, &open_intent(tick.clone(), Obol::new(5_000_000))).expect("builds");
             // No input-0 vault exists; the vault fields describe the one being created.
             IEnv {
                 plan: built.plan,
@@ -258,7 +258,11 @@ fn issuer_matrix_is_diagonal() {
             // The diagonal keeps the environment's own op; off-diagonal ops are rebuilt from
             // the environment's numbers.
             if i != j {
-                set_slot_kind(&mut p, e.input, SlotKind::Issuer { state, op: Box::new(issuer_op_for(i, &e)) });
+                set_slot_kind(
+                    &mut p,
+                    e.input,
+                    SlotKind::Issuer { state, op: Box::new(issuer_op_for(i, &e)) },
+                );
             }
             let accepted = slot_verdict_in_order(d, &p, e.input);
             assert_eq!(accepted, i == j, "issuer encoding {i:?} against the {j:?} environment");
@@ -274,7 +278,10 @@ fn liquidate_gates_at_the_max_quote() {
     // so acceptance proves the covenant prices the heal band at the MAX quote - at the $55k
     // min the band would demand a residual above 84M sats and reject.
     let d = TestDeploy::get();
-    let s = scenarios::liquidate_with(d, styx_pset::testkit::tick_diverging(d, 120, [55_000, 63_000, 60_000]));
+    let s = scenarios::liquidate_with(
+        d,
+        styx_pset::testkit::tick_diverging(d, 120, [55_000, 63_000, 60_000]),
+    );
     assert!(slot_verdict_in_order(d, &s.plan, 0), "liquidate under a diverging tick must accept");
     finalize(&d.ctx, &s.plan).expect("full plan accepts");
 }
@@ -302,7 +309,9 @@ fn stability_matrix_is_diagonal() {
     // BadDebt environment: the attested bad-debt close (reserve shrinks, issuer authors it).
     let bad = scenarios::bad_debt(d).plan;
 
-    for (env_name, plan, diag) in [("accumulate", acc, StabilityOp::Accumulate), ("bad-debt", bad, StabilityOp::BadDebt)] {
+    for (env_name, plan, diag) in
+        [("accumulate", acc, StabilityOp::Accumulate), ("bad-debt", bad, StabilityOp::BadDebt)]
+    {
         for op in [StabilityOp::Accumulate, StabilityOp::BadDebt] {
             let mut p = plan.clone();
             set_slot_kind(&mut p, 3, SlotKind::Stability(op));

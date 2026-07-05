@@ -7,9 +7,13 @@ use styx_core::units::{BlockHeight, MathError, Obol, Sats};
 /// later.
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
-    /// The tick is older than the issuer's mint-recency anchor.
+    /// The tick is older than the issuer's mint-recency anchor (non-strict floor).
     #[error("stale tick: height {} is below the issuer anchor {}", tick.raw(), anchor.raw())]
     StaleTick { tick: BlockHeight, anchor: BlockHeight },
+    /// The tick does not advance the vault's freshness ratchet, which is strict: DRAW and
+    /// REFRESH need a tick strictly newer than the vault's last_height.
+    #[error("tick height {} does not advance the vault ratchet at {}", tick.raw(), last_height.raw())]
+    RatchetNotAdvanced { tick: BlockHeight, last_height: BlockHeight },
     /// A quote carries a zero price; the covenants reject it at the quorum layer.
     #[error("zero price in the oracle tick")]
     ZeroPrice,
@@ -30,6 +34,12 @@ pub enum BuildError {
     /// layouts).
     #[error("funding mismatch: need exactly {} sats, have {}", need.raw(), have.raw())]
     FundingMismatch { need: Sats, have: Sats },
+    /// The OBOL payer coin cannot cover the repayment.
+    #[error("insufficient payer: need {} OBOL units, have {}", need.raw(), have.raw())]
+    InsufficientPayer { need: Obol, have: Obol },
+    /// A repayment above the vault's debt.
+    #[error("amount {} exceeds the debt {}", amount.raw(), debt.raw())]
+    AmountExceedsDebt { amount: Obol, debt: Obol },
     #[error(transparent)]
     Math(#[from] MathError),
 }

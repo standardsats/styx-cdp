@@ -62,7 +62,10 @@ pub fn poke_unchecked(
     ];
     let slots = vec![WitnessSlot {
         input: 0,
-        kind: SlotKind::Issuer { state: issuer.state, op: Box::new(IssuerOp::Poke { tick: intent.tick.clone() }) },
+        kind: SlotKind::Issuer {
+            state: issuer.state,
+            op: Box::new(IssuerOp::Poke { tick: intent.tick.clone() }),
+        },
     }];
 
     let plan = TxPlan { tx, in_utxos, slots };

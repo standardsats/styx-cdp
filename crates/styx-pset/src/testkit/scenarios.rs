@@ -73,7 +73,12 @@ pub fn set_slot_kind(plan: &mut TxPlan, input: u32, kind: SlotKind) {
 }
 
 /// Sign the plan's vault sighash with the owner key and install the completed op.
-pub fn sign_owner_op(d: &TestDeploy, plan: &mut TxPlan, owner: &zkp::Keypair, op: impl Fn(Sig) -> VaultOp) {
+pub fn sign_owner_op(
+    d: &TestDeploy,
+    plan: &mut TxPlan,
+    owner: &zkp::Keypair,
+    op: impl Fn(Sig) -> VaultOp,
+) {
     let digest = vault_sighash(&d.ctx, plan).expect("sibling slots accept");
     let sig = owner_sig(d, owner, digest);
     set_vault_op(plan, op(sig));
@@ -97,7 +102,11 @@ pub fn close(d: &TestDeploy) -> Scenario {
     let tx = Transaction {
         version: 2,
         lock_time: LockTime::ZERO,
-        input: vec![txin(synthetic_outpoint(0xC0)), txin(synthetic_outpoint(0xA0)), txin(synthetic_outpoint(0xB2))],
+        input: vec![
+            txin(synthetic_outpoint(0xC0)),
+            txin(synthetic_outpoint(0xA0)),
+            txin(synthetic_outpoint(0xB2)),
+        ],
         output: vec![
             txout(COLL - FEE.raw(), op_true_spk(), p.policy),
             txout(POT + DEBT, a.pot_spk(), p.obol),
@@ -174,7 +183,11 @@ pub fn draw(d: &TestDeploy) -> Scenario {
     let tx = Transaction {
         version: 2,
         lock_time: LockTime::from_consensus(H),
-        input: vec![txin(synthetic_outpoint(0xC0)), txin(synthetic_outpoint(0xA0)), txin(synthetic_outpoint(0xA2))],
+        input: vec![
+            txin(synthetic_outpoint(0xC0)),
+            txin(synthetic_outpoint(0xA0)),
+            txin(synthetic_outpoint(0xA2)),
+        ],
         output: vec![
             txout(COLL - FEE.raw(), a.vault_spk(&succ), p.policy),
             txout(POT - dr, a.pot_spk(), p.obol),
@@ -233,10 +246,8 @@ pub fn refresh(d: &TestDeploy) -> Scenario {
             fee_out(FEE, p.policy),
         ],
     };
-    let in_utxos = vec![
-        claimed(COLL, a.vault_spk(&vault), p.policy),
-        claimed(fee_coin, op_true_spk(), p.policy),
-    ];
+    let in_utxos =
+        vec![claimed(COLL, a.vault_spk(&vault), p.policy), claimed(fee_coin, op_true_spk(), p.policy)];
     let slots = vec![vault_slot(vault, VaultOp::Refresh { tick: tick.clone() })];
     let plan = TxPlan { tx, in_utxos, slots };
     Scenario { plan, tick, amount: Obol::new(DEBT), owner, vault }

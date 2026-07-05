@@ -20,6 +20,7 @@ pub mod finalize;
 pub mod intent;
 pub mod layout;
 pub mod plan;
+pub mod sign;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub mod testkit;
 

@@ -28,8 +28,13 @@ green. Statuses: [ ] planned, [x] done.
   accepts in the full-liq and bad-debt environments (both return the full debt to the pot,
   and CLOSE is deliberately permissive once the owner signs). No permissionless encoding
   accepts off-diagonal.
-- [ ] **M6 - owner ops.** REPAY / CLOSE / DRAW / REFRESH builders with their negatives
-  (collateral skim, stale tick, unhealthy refresh, refresh-as-draw drain, wrong owner key).
+- [x] **M6 - owner ops.** REPAY / CLOSE / DRAW / REFRESH builders with typed intents (the
+  fee policy lives in the types: REPAY/REFRESH carry a mandatory separate fee coin, CLOSE
+  and DRAW pay from collateral), `sign::owner_sign` / `install_owner_sig` as the wallet
+  seam, and the ported probes: collateral skim, strict-ratchet stale tick, unhealthy
+  refresh, refresh-as-draw drain (M-2), wrong owner key. Known follow-up: the matrix
+  scenarios for these four ops still hand-build their layouts; fold them onto the builders
+  when M7 promotes the liquidation scenarios.
 - [ ] **M7 - liquidations.** Partial (heal band, fee split, sybil-reserve), full-liq (band
   gates), bad-debt (attest, fake vault, no-issuer, wrong reserve index, recap bypass, 20% cap).
 - [ ] **M8 - REDEEM + remaining probes.** Backing-ratio floor, poke index guard, zero price,

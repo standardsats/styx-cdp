@@ -4,8 +4,7 @@
 #   styx-node -> styx-pset -> styx-core
 # styx-core and styx-pset are pure (no node, no IO); elementsd appears only in styx-node.
 #
-# simplicityhl is pinned to the same git rev as the prototype (liquid-styx demos/04-v1-cdp):
-# the prune verdict of `satisfy_with_env` is the test oracle for the whole prune-level tier,
+# simplicityhl is pinned by rev: the prune verdict of `satisfy_with_env` is the test oracle for the whole prune-level tier,
 # so this rev must not float. Bumping it requires re-running the e2e negative spot-checks
 # (prune verdict == node verdict calibration).
 

@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn coll_at_cr_matches_known_vectors() {
-        // The prototype's live numbers: $50k debt at $120k/BTC.
+        // The reference numbers: $50k debt at $120k/BTC.
         // 150%: (5_000_000 * 300_000_000) / (120_000 * 200) = 62_500_000 sats = 0.625 BTC.
         assert_eq!(
             coll_at_cr(5_000_000, Price::new(120_000), RatioK::from_cr_percent(150)),

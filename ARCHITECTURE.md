@@ -5,9 +5,8 @@ Simplicity covenants. The protocol itself is specified in `spec-site/` and imple
 five frozen covenants in `covenants/`; this codebase builds, signs, and finalizes the
 transactions that drive them.
 
-The implementation is a decomposition of a working prototype (the liquid-styx demo repo,
-`demos/04-v1-cdp`), not a redesign: transaction layouts, witness structures, and math are ported
-verbatim and put under tests.
+Transaction layouts, witness structures, and math follow the frozen covenants exactly and are
+put under tests that make the covenants themselves the judge.
 
 ## Crate graph
 
@@ -41,8 +40,8 @@ styx-node  ->  styx-pset  ->  styx-core
 ## Covenants and the freeze
 
 `covenants/*.simf` are the five frozen v1 covenants (vault, issuer, stability, pot_outflow,
-reserve_repay), byte-identical in behaviour to the prototype's `v1-covenant-freeze` tag. A test
-enforces the freeze: `styx-core/src/golden.rs` compiles each source against fixed dummy params
+reserve_repay), behaviourally frozen on 2026-07-03. A test enforces
+the freeze: `styx-core/src/golden.rs` compiles each source against fixed dummy params
 and asserts its CMR against the recorded frozen value. CMRs do not commit to comments, so doc
 edits pass; any behavioural edit fails the suite.
 

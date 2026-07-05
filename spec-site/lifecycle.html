@@ -142,7 +142,7 @@ embedded in another transaction to satisfy a token gate while pinning nothing.</
 
 <h2 id="demo"><span class="sec">3</span>The reference run</h2>
 
-<p>The reference implementation behind this spec exercises the full ladder in one on-node run
+<p>The full ladder was exercised in one on-node run
 against a regtest Simplicity elementsd: OPEN (fee to reserve), REPAY, DRAW, REFRESH, CLOSE, a
 price dip, partial LIQUIDATE, FULL-LIQ, a crash, BAD-DEBT, POKE, and REDEEM at the backing
 floor - plus 27 negative transactions, each rejected by a single identified covenant gate.

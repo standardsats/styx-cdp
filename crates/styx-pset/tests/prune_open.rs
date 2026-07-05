@@ -1,5 +1,5 @@
 //! OPEN at the prune tier: four inputs, three covenant slots (pot outflow, reserve
-//! accumulate, issuer open). Ports the prototype's `open_fee_probe` (E-2 borrow-fee pin).
+//! accumulate, issuer open). Includes the E-2 borrow-fee probes.
 
 use styx_core::consts::{K_FEE_HALF_PERCENT, K_OPEN_MIN};
 use styx_core::elements::confidential::Value as CValue;
@@ -12,7 +12,7 @@ use styx_pset::testkit::{
     tick_diverging, TestDeploy,
 };
 
-/// The scenario of the prototype's LP open: $50k principal at $120k/BTC, 150% CR.
+/// The reference scenario: $50k principal at $120k/BTC, 150% CR.
 fn genuine() -> (&'static TestDeploy, styx_pset::plan::Built<styx_pset::build::open::OpenDelta>) {
     let d = TestDeploy::get();
     let state = protocol_state(100_000_000, 1_000_000, 100);
@@ -40,7 +40,7 @@ fn open_accepts() {
 fn open_rejects_short_borrow_fee() {
     // One sat short on the reserve successor. The reserve's own grow-only arm still passes
     // (the output grows), so the only rejecting gate is the issuer's exact +fee pin - the
-    // prototype's open_fee_probe, asserted per slot.
+    // E-2 borrow-fee probe, asserted per slot.
     let (d, built) = genuine();
     let plan = built.plan.tamper(|tx, _| {
         let CValue::Explicit(v) = tx.output[3].value else { panic!("explicit") };
@@ -55,7 +55,7 @@ fn open_rejects_short_borrow_fee() {
 fn open_rejects_misrouted_borrow_fee() {
     // The full fee amount, paid to a non-reserve script. Both the issuer's STABILITY_SPK pin
     // and the reserve's own successor check reject; the issuer slot is asserted alone to
-    // mirror the prototype probe.
+    // attribute the rejection.
     let (d, built) = genuine();
     let plan = built.plan.tamper(|tx, _| {
         tx.output[3].script_pubkey = op_true_spk();

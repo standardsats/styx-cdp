@@ -1,8 +1,8 @@
 //! The builder output: a complete transaction body plus the plan for witnessing it.
 
-use styx_core::domain::IssuerState;
+use styx_core::domain::{IssuerState, VaultState};
 use styx_core::elements::{Transaction, Txid};
-use styx_core::encode::{IssuerOp, StabilityOp};
+use styx_core::encode::{IssuerOp, StabilityOp, VaultOp};
 use styx_core::simplicity::jet::elements::ElementsUtxo;
 
 /// Which covenant satisfies one input, and with what witness values. Key-spend (wallet)
@@ -16,8 +16,13 @@ pub enum SlotKind {
     PotOutflow,
     /// The stability reserve, with its two-way OP.
     Stability(StabilityOp),
-    /// The issuer singleton: the spent state and the op.
-    Issuer { state: IssuerState, op: IssuerOp },
+    /// The issuer singleton: the spent state and the op. Boxed: the op carries a full
+    /// oracle tick, and clippy flags the size gap against the payload-free pot variants.
+    Issuer { state: IssuerState, op: Box<IssuerOp> },
+    /// A vault: the spent state and the op. Owner ops carry their signature as data inside
+    /// the op; it is signed over the vault input's sighash, so the vault slot goes last in
+    /// the plan and `finalize::vault_sighash` exposes the digest to sign.
+    Vault { state: VaultState, op: Box<VaultOp> },
 }
 
 #[derive(Debug, Clone)]
@@ -33,8 +38,8 @@ pub struct WitnessSlot {
 pub struct TxPlan {
     pub tx: Transaction,
     pub in_utxos: Vec<ElementsUtxo>,
-    /// In witnessing order: signature-free covenants first (the prototype's defensive
-    /// ordering), the vault last once vault ops exist.
+    /// In witnessing order: signature-free covenants first, the vault last (the defensive
+    /// convention: its owner-signature slots are filled before covenant pruning).
     pub slots: Vec<WitnessSlot>,
 }
 

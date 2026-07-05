@@ -100,7 +100,7 @@ pub fn open_unchecked(
         claimed(intent.funding.value.raw(), intent.funding.spk.clone(), p.policy),
         claimed(protocol.reserve.value.raw(), a.stability_spk(), p.policy),
     ];
-    // Witnessing order mirrors the prototype: pot outflow, reserve accumulate, then the
+    // Witnessing order: pot outflow, reserve accumulate, then the
     // issuer, which reads both.
     let slots = vec![
         WitnessSlot { input: 0, kind: SlotKind::PotOutflow },
@@ -109,11 +109,11 @@ pub fn open_unchecked(
             input: 1,
             kind: SlotKind::Issuer {
                 state: protocol.issuer.state,
-                op: IssuerOp::Open {
+                op: Box::new(IssuerOp::Open {
                     principal: intent.principal,
                     owner: xonly_u256(&intent.owner),
                     tick: intent.tick.clone(),
-                },
+                }),
             },
         },
     ];

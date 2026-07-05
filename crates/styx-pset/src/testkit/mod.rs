@@ -23,8 +23,7 @@ use crate::Ctx;
 pub const FEE: Sats = Sats::new(10_000);
 pub const SUPPLY: Obol = Obol::new(100_000_000);
 
-/// The fixed test deploy: dummy assets, the prototype's five oracle secrets, a constant
-/// genesis hash. Compiled once per test binary.
+/// The fixed test deploy: dummy assets, fixed oracle secrets, a constant genesis hash. Compiled once per test binary.
 pub struct TestDeploy {
     pub ctx: Ctx,
     pub oracle_keys: [zkp::Keypair; 5],
@@ -128,7 +127,7 @@ pub fn poke_intent(tick: OracleTick) -> PokeIntent {
     }
 }
 
-/// An open intent at exactly 150% CR with exact funding, the prototype's LP-open shape.
+/// An open intent at exactly 150% CR with exact funding.
 pub fn open_intent(tick: OracleTick, principal: Obol) -> OpenIntent {
     let (lo, _) = tick.price_range();
     let debt_cents = principal.covenant_cents().unwrap();
@@ -166,7 +165,7 @@ pub fn assert_rejects(d: &TestDeploy, plan: &TxPlan) -> PruneRejected {
 }
 
 /// The verdict of the single covenant slot at `input`, against the bare (unwitnessed)
-/// transaction - the prototype's single-covenant probe pattern.
+/// transaction - the single-covenant probe pattern.
 #[track_caller]
 pub fn slot_verdict(d: &TestDeploy, plan: &TxPlan, input: u32) -> bool {
     let slot = plan
@@ -176,3 +175,5 @@ pub fn slot_verdict(d: &TestDeploy, plan: &TxPlan, input: u32) -> bool {
         .unwrap_or_else(|| panic!("no covenant slot at input {input}"));
     slot_witness(&d.ctx, &plan.tx, &plan.in_utxos, slot).is_ok()
 }
+
+pub mod scenarios;

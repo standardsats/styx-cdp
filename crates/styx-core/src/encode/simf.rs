@@ -2,8 +2,8 @@
 //!
 //! `ty()` and `value()` come from the same Rust type, so a value can never disagree with the
 //! type it claims. For sums the sibling arm's type is supplied by the type parameter rather
-//! than picked by hand at each call site; the prototype's `Value::right(hand_picked_ty, ...)`
-//! pattern is where a wrong pick moves the payload into a different covenant arm.
+//! than picked by hand at each call site, where a wrong pick would move the payload into a
+//! different covenant arm.
 
 use simplicityhl::types::{ResolvedType, TypeConstructible, UIntType};
 use simplicityhl::value::ValueConstructible;

@@ -6,7 +6,7 @@
 //! Scales:
 //! - `Sats` - L-BTC satoshis (the collateral and reserve asset).
 //! - `Obol` - OBOL atomic units, which are also debt cents: 1 OBOL unit == $0.01 of debt.
-//!   The prototype's `debt_cents` / `principal` / pot balances are all this one unit.
+//!   The covenants' `debt_cents` / `principal` and the pot balance are all this one unit.
 //! - `Price` - integer USD per BTC, signed as 4 BE bytes inside an oracle tick.
 //! - `RatioK` - the covenant's collateral-ratio unit: k = CR_percent * 2_000_000.
 //! - `BlockHeight` - chain height, the freshness ratchet's unit.

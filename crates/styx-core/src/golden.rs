@@ -4,8 +4,8 @@
 //! source logic. The CMR does not commit to comments or witness values, so doc-only edits leave it
 //! unchanged; any change that alters a covenant's behaviour flips its CMR and fails
 //! `frozen_cmrs_match_v1_freeze`. The vendored `covenants/*.simf` must stay behaviourally
-//! identical to the `v1-covenant-freeze` tag of the prototype repo, where these five hex values
-//! were recorded (2026-07-03); this test is what holds them to it.
+//! identical to the sources frozen on 2026-07-03, when these five hex values were recorded;
+//! this test is what holds them to it.
 //!
 //! To re-freeze after a reviewed covenant change: run
 //! `cargo test -p styx-core golden -- --nocapture`, confirm the change was intended, and paste
@@ -101,7 +101,7 @@ fn compute_cmrs() -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Frozen v1 covenant CMRs (recorded 2026-07-03 at prototype tag `v1-covenant-freeze`).
+/// Frozen v1 covenant CMRs (recorded at the v1 freeze, 2026-07-03).
 /// See the module comment before changing.
 const FROZEN: [(&str, &str); 5] = [
     ("reserve_repay", "52828127db4184834512b2e486e23c308f037e68deab8506fdcbb96e4b9e303f"),

@@ -3,16 +3,18 @@
 //!
 //! `satisfy_with_env` gives the same accept/reject verdict the node gives, so this is both
 //! the production path and the prune-tier test oracle. Slots are processed in the plan's
-//! order over the progressively witnessed transaction, matching the prototype's defensive
-//! ordering (signature-free covenants first).
+//! order over the progressively witnessed transaction (defensive ordering: signature-free
+//! covenants first).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use styx_core::artifacts::{cmr_script, PotLeaf};
+use styx_core::elements::hashes::Hash as _;
 use styx_core::elements::taproot::ControlBlock;
 use styx_core::elements::Transaction;
-use styx_core::encode::{issuer_op_value, stability_op_value};
+use styx_core::encode::{issuer_op_value, stability_op_value, vault_op_value};
+use styx_core::params::xonly_u256;
 use styx_core::simplicity::jet::elements::{ElementsEnv, ElementsUtxo};
 use styx_core::simplicityhl::str::WitnessName;
 use styx_core::simplicityhl::value::ValueConstructible;
@@ -68,7 +70,56 @@ pub fn slot_witness(
             ]);
             pruned_witness(ctx, &a.issuer, cb, tx, in_utxos, slot.input, wv, "issuer")
         }
+        SlotKind::Vault { state, op } => {
+            let cb = a.vault_control_block(state);
+            let wv = witness_values(vec![
+                ("DEBT", Value::u64(state.debt.raw())),
+                ("OWNER", Value::u256(xonly_u256(&state.owner))),
+                ("LAST_HEIGHT", Value::u32(state.last_height.raw())),
+                ("OP", vault_op_value(op)),
+            ]);
+            pruned_witness(ctx, &a.vault, cb, tx, in_utxos, slot.input, wv, "vault")
+        }
     }
+}
+
+/// The transaction with every slot before the one at `input` witnessed, in plan order - the
+/// state the covenant at `input` is verified against during `finalize`.
+pub fn tx_before_slot(ctx: &Ctx, plan: &TxPlan, input: u32) -> Result<Transaction, PruneRejected> {
+    let mut tx = plan.tx.clone();
+    for slot in &plan.slots {
+        if slot.input == input {
+            break;
+        }
+        let witness = slot_witness(ctx, &tx, &plan.in_utxos, slot)?;
+        tx.input[slot.input as usize].witness.script_witness = witness;
+    }
+    Ok(tx)
+}
+
+/// The sighash the vault owner signs, for the plan's vault slot. Computed against the same
+/// transaction state `finalize` verifies against, so the signature survives finalization
+/// regardless of whether the sighash commits to sibling witnesses.
+pub fn vault_sighash(ctx: &Ctx, plan: &TxPlan) -> Result<[u8; 32], PruneRejected> {
+    let (input, state) = plan
+        .slots
+        .iter()
+        .find_map(|s| match &s.kind {
+            SlotKind::Vault { state, .. } => Some((s.input, *state)),
+            _ => None,
+        })
+        .ok_or(PruneRejected { input: 0, covenant: "vault", message: "no vault slot".into() })?;
+    let tx = tx_before_slot(ctx, plan, input)?;
+    let env = ElementsEnv::new(
+        Arc::new(tx),
+        plan.in_utxos.clone(),
+        input,
+        ctx.artifacts.vault.commit().cmr(),
+        ctx.artifacts.vault_control_block(&state),
+        None,
+        ctx.genesis,
+    );
+    Ok(env.c_tx_env().sighash_all().to_byte_array())
 }
 
 fn witness_values(pairs: Vec<(&str, Value)>) -> WitnessValues {

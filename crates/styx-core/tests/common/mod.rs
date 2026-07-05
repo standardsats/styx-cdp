@@ -29,7 +29,7 @@ pub fn asset(byte: u8) -> AssetId {
     AssetId::from_slice(&[byte; 32]).unwrap()
 }
 
-/// The fixed test deploy: dummy assets, the prototype's five oracle secrets.
+/// The fixed test deploy: dummy assets, fixed oracle secrets.
 pub fn test_params() -> Params {
     Params {
         obol: asset(0x01),

@@ -56,6 +56,9 @@ impl OracleSlot {
 
 /// A price signed by one oracle. The signature covers the full tick digest (height, price,
 /// backing_k), not the price alone.
+///
+/// A zero price is representable here and the covenants reject it (vault.simf:84 asserts
+/// 0 < price); builders must refuse to build with one before that.
 #[derive(Debug, Clone, Copy)]
 pub struct SignedQuote {
     pub price: Price,
@@ -133,6 +136,39 @@ mod tests {
         assert_eq!(OracleSlot::new(5).map(|_| ()), Err(OracleError::InvalidSlot(5)));
         assert!(OracleSlot::new(4).is_ok());
     }
+
+    #[test]
+    fn sign_quote_verifies_against_the_tick_digest() {
+        let secp = zkp::Secp256k1::new();
+        let mut sk = [0u8; 32];
+        sk[31] = 7;
+        let kp = zkp::Keypair::from_seckey_slice(&secp, &sk).unwrap();
+        let payload = TickPayload {
+            height: BlockHeight::new(100),
+            price: Price::new(120_000),
+            backing_k: RatioK::from_cr_percent(100),
+        };
+        let q = sign_quote(&kp, &payload);
+        assert_eq!(q.price, payload.price);
+
+        let sig = zkp::schnorr::Signature::from_slice(&q.sig).unwrap();
+        let msg = zkp::Message::from_digest(tick_digest(&payload));
+        secp.verify_schnorr(&sig, &msg, &kp.x_only_public_key().0).unwrap();
+
+        // The same signature must not verify for any other payload.
+        let other = zkp::Message::from_digest(tick_digest(&TickPayload {
+            height: BlockHeight::new(101),
+            ..payload
+        }));
+        assert!(secp.verify_schnorr(&sig, &other, &kp.x_only_public_key().0).is_err());
+
+        // no_aux_rand makes the signature deterministic; this pins the whole signing path
+        // (digest construction included).
+        let sig_hex: String = q.sig.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(sig_hex, GOLDEN_SIG);
+    }
+
+    const GOLDEN_SIG: &str = "3124c7c89059427620c8e79c1331c55bcc10db5c665df63cf52a15ca6a858284a8aad148b4dead57db0ed3c181904256b16fbe7f9af263c365ec90a8fc5761b4";
 
     #[test]
     fn tick_digest_commits_to_every_field() {

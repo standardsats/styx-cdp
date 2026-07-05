@@ -9,64 +9,30 @@
 //! Neither layer proves arm selection - two arms can share a type-compatible shape. That is
 //! M5's discrimination matrix.
 
+mod common;
+
 use std::collections::HashMap;
 
-use simplicityhl::elements::secp256k1_zkp as zkp;
-use simplicityhl::elements::AssetId;
+use common::{test_artifacts, xonly};
 use simplicityhl::str::WitnessName;
 use simplicityhl::value::ValueConstructible;
 use simplicityhl::{Value, WitnessValues};
 
-use styx_core::artifacts::Artifacts;
 use styx_core::encode::{
     issuer_op_value, lower_tick, stability_op_value, vault_op_value, Either, IssuerOp, IssuerOpSum,
     StabilityOp, StabilityOpSum, ToSimf, VaultOp, VaultOpSum,
 };
 use styx_core::oracle::{OracleSlot, OracleTick, SignedQuote};
-use styx_core::params::Params;
 use styx_core::units::{BlockHeight, Obol, Price, RatioK};
 use styx_core::U256;
-
-fn keypair(secret: u8) -> zkp::Keypair {
-    let mut sk = [0u8; 32];
-    sk[31] = secret;
-    zkp::Keypair::from_seckey_slice(&zkp::Secp256k1::new(), &sk).unwrap()
-}
-
-fn xonly(secret: u8) -> zkp::XOnlyPublicKey {
-    keypair(secret).x_only_public_key().0
-}
-
-fn test_artifacts() -> &'static Artifacts {
-    static ARTIFACTS: std::sync::OnceLock<Artifacts> = std::sync::OnceLock::new();
-    ARTIFACTS.get_or_init(|| {
-        Artifacts::compile(&Params {
-            obol: AssetId::from_slice(&[0x01; 32]).unwrap(),
-            issuer_token: AssetId::from_slice(&[0x02; 32]).unwrap(),
-            policy: AssetId::from_slice(&[0x03; 32]).unwrap(),
-            oracle_pks: [xonly(7), xonly(8), xonly(9), xonly(101), xonly(102)],
-        })
-        .unwrap()
-    })
-}
 
 fn w(name: &str, v: Value) -> (WitnessName, Value) {
     (WitnessName::from_str_unchecked(name), v)
 }
 
-/// A tick with dummy signatures in slots 0..2. Type conformance does not verify signatures.
+/// Type conformance does not verify signatures, so the dummy-sig tick suffices.
 fn tick() -> OracleTick {
-    let quote = SignedQuote { price: Price::new(120_000), sig: [0u8; 64] };
-    OracleTick::new(
-        BlockHeight::new(100),
-        RatioK::from_cr_percent(100),
-        [
-            (OracleSlot::new(0).unwrap(), quote),
-            (OracleSlot::new(1).unwrap(), quote),
-            (OracleSlot::new(2).unwrap(), quote),
-        ],
-    )
-    .unwrap()
+    common::dummy_tick()
 }
 
 fn sig() -> styx_core::encode::Sig {
@@ -174,6 +140,19 @@ fn every_stability_op_variant_satisfies() {
         let wv = WitnessValues::from(HashMap::from([w("OP", stability_op_value(&op))]));
         test_artifacts().stability.satisfy(wv).unwrap_or_else(|e| panic!("{op:?}: {e}"));
     }
+}
+
+#[test]
+fn vault_rejects_a_mistyped_op_value() {
+    // An issuer OP value under the vault's OP name: satisfy must reject it, which is what
+    // makes the positive satisfy tests above meaningful.
+    let wv = WitnessValues::from(HashMap::from([
+        w("DEBT", Value::u64(5_000_000)),
+        w("OWNER", Value::u256(owner_u256())),
+        w("LAST_HEIGHT", Value::u32(100)),
+        w("OP", issuer_op_value(&IssuerOp::Poke { tick: tick() })),
+    ]));
+    assert!(test_artifacts().vault.satisfy(wv).is_err());
 }
 
 // --- tick lowering -------------------------------------------------------------

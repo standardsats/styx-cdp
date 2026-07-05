@@ -45,9 +45,9 @@
  * ISSUER -> S edge); the reserve's bad-debt arm gates on the issuer token and defers the amount.
  *
  * Ops (witness OP, a nested Either sum; the arms are below):
- *   open   = Left( (principal, (owner, (height, [(price, sig); 3]))) )   mint against a NEW vault
+ *   open   = Left( (principal, (owner, tick)) )                          mint against a NEW vault
  *   draw   = Right(Left( (old_debt, (owner, (old_last_height, (new_debt, draw_height)))) ))  borrow more
- *   poke   = Right(Right(Left( (height, [(price, sig); 3]) )))           advance the anchor, no movement
+ *   poke   = Right(Right(Left( tick )))                                  advance the anchor, no movement
  *   attest = Right(Right(Right( (debt, (owner, (lh, tick))) )))         bad-debt attest
  * The oracle tick is (height, (backing_k, [slot; 5])); verify_quorum verifies exactly three of five,
  * timelocks to the height, and returns (min, max). backing_k is co-signed but only REDEEM (in the vault)
@@ -227,7 +227,7 @@ fn main() {
     // replay) and advance it; POKE advances it permissionlessly with no token movement.
     assert!(jet::eq_256(own_spk_hash_for(last_mint_height), jet::current_script_hash()));
 
-    // OP = open | (draw | (poke | attest)). tick = (height, [(price, sig); 3]).
+    // OP = open | (draw | (poke | attest)). tick = (height, (backing_k, [slot; 5])).
     //   attest = (debt, (owner, (lh, tick)))
     let op: Either<
         (u64, (u256, (u32, (u32, [Either<(), (u32, Signature)>; 5])))),

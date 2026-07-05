@@ -3,7 +3,7 @@
 A collateralized debt position (CDP) protocol on Liquid, built on Simplicity covenants.
 Lock L-BTC collateral in a covenant-enforced vault, mint the OBOL stable asset against it,
 keep the peg through permissionless liquidations, redemptions, and a stability reserve -
-with no multisig, no federation, and no admin keys. The rules are the covenants.
+no multisig, federation, or admin keys.
 
 - `spec-site/` - the human-readable protocol specification (architecture, lifecycle, oracle
   model, reserve economics, security analysis).

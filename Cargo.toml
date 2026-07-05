@@ -1,6 +1,6 @@
 # STYX v1 testnet implementation workspace.
 #
-# Crate graph (the dependency arrows ARE the architecture):
+# Crate graph:
 #   styx-node -> styx-pset -> styx-core
 # styx-core and styx-pset are pure (no node, no IO); elementsd appears only in styx-node.
 #

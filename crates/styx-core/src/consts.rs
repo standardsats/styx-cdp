@@ -1,6 +1,6 @@
 //! Protocol constants shared by the taproot layer and the covenant params.
 //!
-//! Everything here is a fixed property of the v1 protocol, not of a particular deploy:
+//! Everything here is protocol-level, independent of any particular deploy:
 //! the data-leaf version byte, the leaf version-control words the covenants reconstruct
 //! Merkle branches with, the canonical NUMS internal key, and the Elements tapleaf tag.
 
@@ -29,7 +29,7 @@ pub const K_HEALTH_GATE: RatioK = RatioK::from_cr_percent(130);
 pub const K_HEAL_LO: RatioK = RatioK::from_cr_percent(132);
 /// 137% - the partial-liquidation heal band ceiling (vault.simf:347).
 pub const K_HEAL_HI: RatioK = RatioK::from_cr_percent(137);
-/// 150% - the minimum CR at OPEN and DRAW (vault.simf:305).
+/// 150% - the minimum CR at OPEN (issuer.simf:187) and DRAW (vault.simf:305).
 pub const K_OPEN_MIN: RatioK = RatioK::from_cr_percent(150);
 /// 0.5% of debt - the borrow fee at OPEN (issuer.simf:257) and the redemption fee
 /// (vault.simf:442), both routed to the stability reserve.

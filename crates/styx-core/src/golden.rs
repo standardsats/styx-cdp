@@ -1,13 +1,13 @@
 //! Freeze gate: golden CMRs of the five frozen v1 covenants.
 //!
-//! Each covenant is compiled against a FIXED set of dummy params so its CMR isolates the covenant
+//! Each covenant is compiled against a fixed set of dummy params so its CMR isolates the covenant
 //! source logic. The CMR does not commit to comments or witness values, so doc-only edits leave it
-//! unchanged; any change that alters a covenant's behaviour flips its CMR and fails `frozen()`.
-//! This is what enforces the freeze: the vendored `covenants/*.simf` must stay behaviourally
+//! unchanged; any change that alters a covenant's behaviour flips its CMR and fails
+//! `frozen_cmrs_match_v1_freeze`. The vendored `covenants/*.simf` must stay behaviourally
 //! identical to the `v1-covenant-freeze` tag of the prototype repo, where these five hex values
-//! were recorded (2026-07-03).
+//! were recorded (2026-07-03); this test is what holds them to it.
 //!
-//! To RE-FREEZE after an intentional, reviewed covenant change: run
+//! To re-freeze after a reviewed covenant change: run
 //! `cargo test -p styx-core golden -- --nocapture`, confirm the change was intended, and paste
 //! the new hex below.
 
@@ -26,8 +26,8 @@ fn w(name: &str, v: Value) -> (WitnessName, Value) {
 fn args(pairs: Vec<(WitnessName, Value)>) -> Arguments {
     Arguments::from(pairs.into_iter().collect::<HashMap<_, _>>())
 }
-/// A fixed dummy 32-byte config param (asset id / scriptHash / key / cmr). The value is
-/// irrelevant, only that it is CONSTANT, so the CMR tracks the source, not the per-deploy config.
+/// A dummy 32-byte config param (asset id / scriptHash / key / cmr). The byte value does not
+/// matter; it only has to stay fixed so the CMR tracks the source rather than the deploy config.
 fn d(byte: u8) -> Value {
     Value::u256(U256::from_byte_array([byte; 32]))
 }
@@ -46,7 +46,13 @@ fn oracle(m: &mut Vec<(WitnessName, Value)>) {
 }
 
 /// Compile all five covenants under the dummy params, in the canonical order.
-fn cmrs() -> Vec<(&'static str, String)> {
+/// Cached: compilation is the expensive step, and every golden test wants the same result.
+fn cmrs() -> &'static [(&'static str, String)] {
+    static CMRS: std::sync::OnceLock<Vec<(&'static str, String)>> = std::sync::OnceLock::new();
+    CMRS.get_or_init(compute_cmrs)
+}
+
+fn compute_cmrs() -> Vec<(&'static str, String)> {
     let rr = compile(Covenant::ReserveRepay, args(vec![w("OBOL_ID", d(0x01))])).expect("reserve_repay");
     let po = compile(
         Covenant::PotOutflow,
@@ -97,7 +103,7 @@ fn cmrs() -> Vec<(&'static str, String)> {
     ]
 }
 
-/// FROZEN v1 covenant CMRs (recorded 2026-07-03 at prototype tag `v1-covenant-freeze`).
+/// Frozen v1 covenant CMRs (recorded 2026-07-03 at prototype tag `v1-covenant-freeze`).
 /// See the module comment before changing.
 const FROZEN: [(&str, &str); 5] = [
     ("reserve_repay", "52828127db4184834512b2e486e23c308f037e68deab8506fdcbb96e4b9e303f"),
@@ -110,7 +116,7 @@ const FROZEN: [(&str, &str); 5] = [
 #[test]
 fn frozen_cmrs_match_v1_freeze() {
     let got = cmrs();
-    for (name, cmr) in &got {
+    for (name, cmr) in got {
         println!("  {name:14} {cmr}");
     }
     for ((name, cmr), (fname, exp)) in got.iter().zip(FROZEN.iter()) {
@@ -124,7 +130,6 @@ fn frozen_cmrs_match_v1_freeze() {
 
 #[test]
 fn all_five_covenants_compile() {
-    // `cmrs()` already compiles all five under the dummy params; this asserts the count so a
-    // future edit that drops a covenant from the golden list is caught explicitly.
+    // cmrs() is cached, so this shares the compile work with the freeze test.
     assert_eq!(cmrs().len(), 5);
 }

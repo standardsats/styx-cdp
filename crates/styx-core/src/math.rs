@@ -1,7 +1,7 @@
 //! Covenant CR math, ported with exact truncation parity.
 //!
 //! `coll_at_cr` is duplicated between this crate and the frozen vault covenant (vault.simf
-//! line 135). The two MUST truncate identically, or a builder emits an amount one sat off a
+//! line 135). The two must truncate identically, or a builder emits an amount one sat off a
 //! covenant `<=` / `<` gate. This file mirrors the covenant's jet semantics operation by
 //! operation; the property-test tier (M9) additionally proves parity against a verbatim
 //! covenant shim.
@@ -17,7 +17,8 @@
 //! All three inputs are u32, so the 32x32 -> 64 products are exact by construction - no
 //! overflow is possible anywhere in the covenant's formula. The Rust port therefore takes the
 //! same u32 domain; `Obol::covenant_cents()` is the checked narrowing from the u64 amount
-//! world (the issuer's mint gate keeps every compliant debt below 2^32 cents).
+//! world (the covenants assert debt < 2^32 at every u64-to-cents narrowing: vault.simf:251,
+//! 301, 421; issuer.simf:255, 426).
 
 use crate::units::{Obol, Price, RatioK, Sats};
 
@@ -75,20 +76,20 @@ mod tests {
         // 3 * 1_000_003 = 3_000_009; 7 * 200 = 1400; 3_000_009 / 1400 = 2142.86...
         let got = coll_at_cr(3, Price::new(7), RatioK::new(1_000_003));
         assert_eq!(got, Sats::new(2142));
-        // The remainder is nonzero, so this vector really does discriminate floor from round.
+        // nonzero remainder: floor and round differ on this vector
         assert_ne!(2142u64 * 1400, 3_000_009);
     }
 
     #[test]
     fn coll_at_cr_zero_price_is_zero() {
-        // Mirror of the covenant's divide_64(n, 0) = 0. The covenant separately REJECTS
-        // zero-price ticks at the quorum layer; this identity only keeps the two formulas
-        // bit-identical on the full input domain.
+        // Mirror of the covenant's divide_64(n, 0) = 0. The quorum layer rejects zero-price
+        // ticks separately; this identity keeps the two formulas bit-identical on the full
+        // input domain.
         assert_eq!(coll_at_cr(5_000_000, Price::new(0), K_PAR), Sats::ZERO);
     }
 
     #[test]
-    fn coll_at_cr_is_total_at_the_domain_corners() {
+    fn coll_at_cr_domain_corners_no_overflow() {
         // (2^32 - 1)^2 = 2^64 - 2^33 + 1 fits u64: the covenant's multiply_32 is exact and so
         // is the port. No panic, no wrap, at any corner of the u32 domain.
         let max = u32::MAX;
@@ -101,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn coll_at_cr_obol_narrows_through_the_mint_gate() {
+    fn coll_at_cr_obol_rejects_debt_above_u32() {
         assert_eq!(
             coll_at_cr_obol(Obol::new(5_000_000), Price::new(120_000), RatioK::from_cr_percent(150)),
             Ok(Sats::new(62_500_000))
@@ -112,9 +113,21 @@ mod tests {
         );
     }
 
+    /// Assert `k` appears as a call-site argument (`, {k})`) in the covenant source. The
+    /// leading comma keeps a longer constant from matching on a substring.
+    fn assert_gates_on(source: &str, covenant: &str, k: crate::units::RatioK) {
+        let needle = format!(", {})", k.raw());
+        assert!(
+            source.contains(&needle),
+            "k literal {} not found as a call-site argument in {covenant}",
+            k.raw()
+        );
+    }
+
     #[test]
     fn band_constants_match_the_frozen_covenant() {
-        // The literals the frozen vault.simf gates on (see the line refs in consts.rs).
+        // Exact values first, then each literal greps out of the embedded frozen source at
+        // its call sites. M9's verbatim shim adds the full semantic parity check.
         assert_eq!(K_PAR.raw(), 200_000_000);
         assert_eq!(K_FULL_LIQ_CAP.raw(), 230_000_000);
         assert_eq!(K_HEALTH_GATE.raw(), 260_000_000);
@@ -124,5 +137,20 @@ mod tests {
         assert_eq!(K_FEE_HALF_PERCENT.raw(), 1_000_000);
         assert_eq!(K_RESERVE_SHARE.raw(), 10_000_000);
         assert_eq!(K_BAD_DEBT_CAP.raw(), 40_000_000);
+
+        let vault = crate::artifacts::Covenant::Vault.source();
+        let issuer = crate::artifacts::Covenant::Issuer.source();
+        assert_gates_on(vault, "vault", K_PAR); // :377, :402
+        assert_gates_on(vault, "vault", K_FULL_LIQ_CAP); // :353, :379
+        assert_gates_on(vault, "vault", K_HEALTH_GATE); // :332, :458
+        assert_gates_on(vault, "vault", K_HEAL_LO); // :346
+        assert_gates_on(vault, "vault", K_HEAL_HI); // :347
+        assert_gates_on(vault, "vault", K_OPEN_MIN); // :305 (DRAW)
+        assert_gates_on(issuer, "issuer", K_OPEN_MIN); // :187 (OPEN)
+        assert_gates_on(vault, "vault", K_FEE_HALF_PERCENT); // :442 (redeem fee)
+        assert_gates_on(issuer, "issuer", K_FEE_HALF_PERCENT); // :257 (borrow fee)
+        assert_gates_on(vault, "vault", K_RESERVE_SHARE); // :357 (penalty share)
+        assert_gates_on(issuer, "issuer", K_RESERVE_SHARE); // :451 (bad-debt bounty)
+        assert_gates_on(issuer, "issuer", K_BAD_DEBT_CAP); // :471 (M-1 cap)
     }
 }

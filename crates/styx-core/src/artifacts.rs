@@ -61,8 +61,8 @@ impl Covenant {
     }
 }
 
-/// A covenant source failed to compile under the given params. Since the sources are frozen and
-/// embedded, this is a config error (bad params), not a source error.
+/// A covenant source failed to compile under the given params. The sources are frozen and
+/// embedded, so a failure here means bad params.
 #[derive(Debug, thiserror::Error)]
 #[error("compile {covenant}: {message}")]
 pub struct CompileError {

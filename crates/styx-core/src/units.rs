@@ -1,8 +1,7 @@
 //! Unit newtypes: every amount in the protocol carries its unit in the type.
 //!
-//! The classic layout bug - putting an OBOL amount into an L-BTC output slot - becomes a compile
-//! error. No `Deref` to the raw integer and no unchecked arithmetic: sums that can exceed the
-//! type return `MathError` instead of wrapping.
+//! Putting an OBOL amount into an L-BTC output slot is a compile error. No `Deref` to the raw
+//! integer; sums that can exceed the type return `MathError` instead of wrapping.
 //!
 //! Scales:
 //! - `Sats` - L-BTC satoshis (the collateral and reserve asset).
@@ -19,8 +18,10 @@ pub enum MathError {
     Overflow,
     #[error("amount underflow")]
     Underflow,
-    /// A debt amount above the covenant's u32-cents domain. The issuer's mint gate asserts
-    /// `new_debt < 2^32` (vault.simf line 301), so a compliant chain state never trips this.
+    /// A debt amount above the covenant's u32-cents domain. The covenants assert
+    /// `debt < 2^32` wherever a u64 amount narrows to cents: vault.simf:251 (witness debt),
+    /// :301 (DRAW), :421 (REDEEM x); issuer.simf:255 (OPEN), :426 (ATTEST). A compliant
+    /// chain state never trips this.
     #[error("debt {0} does not fit the covenant's u32 cents domain")]
     DebtExceedsU32(u64),
 }
@@ -61,9 +62,9 @@ amount_newtype! {
 }
 
 impl Obol {
-    /// Narrow to the covenant's u32-cents domain, mirroring the issuer mint gate
-    /// (`assert!(new_debt < 4294967296)`, vault.simf line 301). Covenant CR math
-    /// (`coll_at_cr`) is only defined on this domain.
+    /// Narrow to the covenant's u32-cents domain, mirroring the covenants' own
+    /// `assert!(jet::lt_64(debt, 4294967296))` gates (vault.simf:251,301,421;
+    /// issuer.simf:255,426). Covenant CR math (`coll_at_cr`) is only defined on this domain.
     pub fn covenant_cents(self) -> Result<u32, MathError> {
         u32::try_from(self.0).map_err(|_| MathError::DebtExceedsU32(self.0))
     }
@@ -95,7 +96,9 @@ impl RatioK {
         RatioK(k)
     }
     /// A whole-percent collateral ratio, e.g. `from_cr_percent(150)` = k 300_000_000.
+    /// Domain: percent <= 2147 (u32::MAX / 2_000_000); protocol bands are all <= 150.
     pub const fn from_cr_percent(percent: u32) -> Self {
+        debug_assert!(percent <= u32::MAX / Self::PER_CR_PERCENT);
         RatioK(percent * Self::PER_CR_PERCENT)
     }
     pub const fn raw(self) -> u32 {

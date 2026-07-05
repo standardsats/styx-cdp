@@ -9,6 +9,7 @@ pub mod full_liq;
 pub mod liquidate;
 pub mod open;
 pub mod poke;
+pub mod redeem;
 pub mod refresh;
 pub mod repay;
 

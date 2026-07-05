@@ -1,29 +1,28 @@
 //! Canonical accepting scenarios: one full transaction per vault op. Since M7 they are thin
-//! wrappers over the checked builders, so the matrix runs against the production layouts;
-//! only REDEEM is still hand-built (its builder lands in M8).
+//! wrappers over the checked builders (REDEEM included since M8), so the matrix runs against
+//! the production layouts.
 //!
 //! Shared numbers: debt $50k (5M cents), owner key 10, last_height 100, collateral at 150%
 //! of $120k/BTC (62.5M sats), pot 95M units, tick height 120. Liquidation scenarios use
 //! their own price regimes (dip 63k, full-liq band 85k, crash 40k).
 
-use styx_core::consts::K_FEE_HALF_PERCENT;
 use styx_core::domain::{OnChain, PotState, VaultState};
 use styx_core::elements::secp256k1_zkp as zkp;
-use styx_core::elements::{LockTime, Transaction};
-use styx_core::encode::{Sig, StabilityOp, VaultOp};
-use styx_core::math::coll_at_cr;
+
+use styx_core::encode::{Sig, VaultOp};
+
 use styx_core::oracle::OracleTick;
-use styx_core::units::{BlockHeight, Obol, Price, Sats};
+use styx_core::units::{BlockHeight, Obol, Sats};
 
 use super::{keypair, op_true_spk, protocol_state, synthetic_outpoint, TestDeploy, FEE};
 use crate::build;
 use crate::finalize::vault_sighash;
 use crate::intent::{
     BadDebtIntent, CloseIntent, DrawIntent, FullLiqIntent, FundingCoin, LiquidateIntent, ObolCoin,
-    RefreshIntent, RepayIntent,
+    RedeemIntent, RefreshIntent, RepayIntent,
 };
-use crate::layout::{claimed, fee_out, txin, txout};
-use crate::plan::{SlotKind, TxPlan, WitnessSlot};
+
+use crate::plan::{SlotKind, TxPlan};
 
 /// A canonical accepting plan plus the parameters cross-encodings are built from.
 pub struct Scenario {
@@ -235,8 +234,7 @@ pub fn bad_debt_intent(tick: OracleTick) -> BadDebtIntent {
     }
 }
 
-/// REDEEM x at par backing: the peg-floor swap, 0.5% fee to the reserve. Hand-built until
-/// the M8 builder lands.
+/// REDEEM x at par backing: the peg-floor swap, 0.5% fee to the reserve.
 pub fn redeem(d: &TestDeploy) -> Scenario {
     redeem_at(d, styx_core::units::RatioK::from_cr_percent(100))
 }
@@ -248,54 +246,6 @@ pub fn redeem_underbacked(d: &TestDeploy) -> Scenario {
     redeem_at(d, styx_core::units::RatioK::new(160_000_000)) // 80% backing
 }
 
-fn redeem_at(d: &TestDeploy, backing_k: styx_core::units::RatioK) -> Scenario {
-    let (vault, owner) = base_vault(DEBT);
-    let a = &d.ctx.artifacts;
-    let p = &d.ctx.params;
-    let (price, x, reserve_bal) = (120_000u32, 1_000_000u64, 1_000_000u64);
-    let floor_k = backing_k.min(styx_core::units::RatioK::from_cr_percent(100));
-    let x_worth = coll_at_cr(x as u32, Price::new(price), floor_k).raw();
-    let fee_share = coll_at_cr(x as u32, Price::new(price), K_FEE_HALF_PERCENT).raw();
-    let succ = VaultState { debt: Obol::new(DEBT - x), ..vault };
-    let tick = d.tick_bk(H, price, backing_k);
-    let tx = Transaction {
-        version: 2,
-        lock_time: LockTime::from_consensus(H),
-        input: vec![
-            txin(synthetic_outpoint(0xC0)),
-            txin(synthetic_outpoint(0xA0)),
-            txin(synthetic_outpoint(0xB4)),
-            txin(synthetic_outpoint(0xA1)),
-        ],
-        output: vec![
-            txout(COLL - x_worth, a.vault_spk(&succ), p.policy),
-            txout(POT + x, a.pot_spk(), p.obol),
-            txout(x_worth - fee_share - FEE.raw(), op_true_spk(), p.policy),
-            txout(reserve_bal + fee_share, a.stability_spk(), p.policy),
-            fee_out(FEE, p.policy),
-        ],
-    };
-    let in_utxos = vec![
-        claimed(COLL, a.vault_spk(&vault), p.policy),
-        claimed(POT, a.pot_spk(), p.obol),
-        claimed(x, op_true_spk(), p.obol),
-        claimed(reserve_bal, a.stability_spk(), p.policy),
-    ];
-    let slots = vec![
-        WitnessSlot { input: 1, kind: SlotKind::PotInflow },
-        WitnessSlot { input: 3, kind: SlotKind::Stability(StabilityOp::Accumulate) },
-        WitnessSlot {
-            input: 0,
-            kind: SlotKind::Vault {
-                state: vault,
-                op: Box::new(VaultOp::Redeem { x: Obol::new(x), tick: tick.clone() }),
-            },
-        },
-    ];
-    let plan = TxPlan { tx, in_utxos, slots };
-    Scenario { plan, tick, amount: Obol::new(x), owner, vault }
-}
-
 /// Kept for callers that need a specific op shape signed into a hand-built plan.
 pub fn sign_owner_op(
     d: &TestDeploy,
@@ -305,4 +255,21 @@ pub fn sign_owner_op(
 ) {
     let digest = vault_sighash(&d.ctx, plan).expect("sibling slots accept");
     set_vault_op(plan, op(owner_sig(d, owner, digest)));
+}
+fn redeem_at(d: &TestDeploy, backing_k: styx_core::units::RatioK) -> Scenario {
+    let (vault, owner) = base_vault(DEBT);
+    let x = 1_000_000u64;
+    let tick = d.tick_bk(H, 120_000, backing_k);
+    let intent = RedeemIntent {
+        x: Obol::new(x),
+        redeemer: obol_coin(0xB4, x),
+        redeemer_spk: op_true_spk(),
+        obol_change_spk: op_true_spk(),
+        tick: tick.clone(),
+        fee: FEE,
+    };
+    let protocol = protocol_state(POT, 1_000_000, LH);
+    let built =
+        build::redeem::redeem(&d.ctx, &protocol, &vault_on_chain(vault, COLL), &intent).expect("builds");
+    Scenario { plan: built.plan, tick, amount: Obol::new(x), owner, vault }
 }

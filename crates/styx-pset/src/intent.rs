@@ -129,3 +129,16 @@ pub struct BadDebtIntent {
     pub tick: OracleTick,
     pub fee: Sats,
 }
+
+/// REDEEM `x` OBOL for collateral at the peg floor: valued at the max quote and the backing
+/// floor min(par, backing_k), less the 0.5% fee to the reserve. Permissionless, no health
+/// gate; x may equal the full debt.
+#[derive(Debug, Clone)]
+pub struct RedeemIntent {
+    pub x: Obol,
+    pub redeemer: ObolCoin,
+    pub redeemer_spk: Script,
+    pub obol_change_spk: Script,
+    pub tick: OracleTick,
+    pub fee: Sats,
+}

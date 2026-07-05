@@ -41,9 +41,11 @@ green. Statuses: [ ] planned, [x] done.
   tick, under/over-heal, short stability fee, sybil reserve, full-liq band gates, stale vs
   issuer anchor, fake vault at input 0 (finding B), no issuer co-spend, reserve at the wrong
   index, recap bypass, the 20% cap (M-1).
-- [ ] **M8 - REDEEM + remaining probes.** Backing-ratio floor, poke index guard, zero price,
-  d=0 drain, decoy pot, asset confusion, second-vault alias. Full probe inventory mapped to
-  covenant gates and audit finding ids.
+- [x] **M8 - REDEEM + remaining probes.** REDEEM as a checked builder (backing floor
+  min(par, backing_k), x in (0, debt], full-debt redemption boundary); the last scenario is
+  now builder-backed. Probes: par extraction under an under-backed tick (E-2 tail), poke and
+  vault index guards, zero price, d=0 drain (Hole A), decoy pot (Hole B), non-OBOL pot. The
+  full inventory is mapped to covenant gates and audit finding ids in tests/probes.rs.
 - [ ] **M9 - math parity properties.** Verbatim covenant shim for `coll_at_cr` (with an
   anti-drift source check), proptest exact-value parity, heal-band edge tightness.
 - [ ] **M10 - PSET invariants.** Golden PSETs, finalize == raw tx, blinded-output and

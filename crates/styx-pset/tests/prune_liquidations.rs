@@ -65,7 +65,10 @@ fn plan_vault(s: &scenarios::Scenario) -> OnChain<styx_core::domain::VaultState>
 fn heal_band(rd_cents: u32, price: u32) -> (Sats, Sats) {
     use styx_core::consts::{K_HEAL_HI, K_HEAL_LO};
     let p = styx_core::units::Price::new(price);
-    (styx_core::math::coll_at_cr(rd_cents, p, K_HEAL_LO), styx_core::math::coll_at_cr(rd_cents, p, K_HEAL_HI))
+    (
+        styx_core::math::coll_at_cr(rd_cents, p, K_HEAL_LO),
+        styx_core::math::coll_at_cr(rd_cents, p, K_HEAL_HI),
+    )
 }
 
 #[test]
@@ -115,10 +118,7 @@ fn liquidate_rejects_full_repayment() {
     intent.dd = vault.state.debt;
     intent.residual = Sats::ZERO;
     intent.keeper.value = vault.state.debt;
-    assert!(matches!(
-        liquidate(&d.ctx, &protocol, &vault, &intent),
-        Err(BuildError::NotPartial { .. })
-    ));
+    assert!(matches!(liquidate(&d.ctx, &protocol, &vault, &intent), Err(BuildError::NotPartial { .. })));
     let built = styx_pset::build::liquidate::liquidate_unchecked(&d.ctx, &protocol, &vault, &intent);
     let rejected = assert_rejects(d, &built.plan);
     assert_eq!(rejected.input, 0, "the vault's partial arm is the rejector");
@@ -269,8 +269,13 @@ fn bad_debt_drains_a_poor_reserve_gracefully() {
         value: Sats::new(62_500_000),
     };
     let protocol = protocol_state(95_000_000, 10_000_000, 100);
-    let built = styx_pset::build::bad_debt::bad_debt(&d.ctx, &protocol, &vault, &bad_debt_intent(d.tick(120, 40_000)))
-        .expect("builds");
+    let built = styx_pset::build::bad_debt::bad_debt(
+        &d.ctx,
+        &protocol,
+        &vault,
+        &bad_debt_intent(d.tick(120, 40_000)),
+    )
+    .expect("builds");
     assert_accepts(d, &built.plan);
     assert_eq!(built.expected.reserve.value, Sats::ZERO);
 }

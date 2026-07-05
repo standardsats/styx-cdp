@@ -1,0 +1,3 @@
+# Match the existing hand style: wider lines, compact struct literals and calls.
+max_width = 105
+use_small_heuristics = "Max"

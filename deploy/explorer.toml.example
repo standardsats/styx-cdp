@@ -1,0 +1,22 @@
+# styx-explorer: the public read-only view. Holds no keys - nothing here is a secret. Caddy
+# fronts it with TLS at explorer.testnet.styx.network; the explorer itself binds loopback.
+
+# The published deployment config (the same file users download at /config).
+styxnet = "/var/lib/styx/liquid-testnet.toml"
+
+# The explorer's own elementsd (a follower).
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "REPLACE"
+# rpc_cookie = "/var/lib/styxnet/.cookie"   # alternative to user/password
+
+# The indexer snapshot, created on first sync.
+snapshot = "/var/lib/styx/explorer-snapshot.json"
+
+# Loopback; Caddy reverse-proxies 9790 for the public hostname.
+listen = "127.0.0.1:9790"
+poll_ms = 2000
+
+# The "open a vault" call-to-action on the page: where users download styx-app. Must be
+# https (validated at load). Omit to leave the section off - the page then links nothing.
+# app_url = "https://styx.network/download"

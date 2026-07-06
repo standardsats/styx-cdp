@@ -18,6 +18,8 @@ no multisig, federation, or admin keys.
   deployment - faucet, a vault, and hunting other people's positions.
 - [SETUP.md](SETUP.md) - multi-machine network bring-up; `deploy/swarm.sh` rehearses the
   whole topology on one host.
+- [DEPLOY.md](DEPLOY.md) - the operator's deploy-day runbook for the public testnet
+  (DNS, oracles, the ceremony, the go-live checklist).
 - [ROADMAP.md](ROADMAP.md) - milestone status.
 
 ## Building

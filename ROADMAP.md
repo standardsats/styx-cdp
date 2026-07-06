@@ -240,15 +240,24 @@ explorer that cannot sign by construction.
   refused open leaves the mempool empty - the validate-first invariant this acceptance
   forced into ops::open), and the keeper loop healing a $50k dip partially through the
   same API, then draining back to idle on stop.
-- [ ] **U1 - the app UI (wallet + keeper, one binary).** Static assets embedded in the
-  binary (the spec-site look: same self-hosted fonts, same theme), served same-origin;
-  a test walks the served HTML/JS and asserts no external URL - no CDN, no telemetry,
-  ever. Wallet tab: status, receive/fund, open sized by collateral_for (a CR slider),
-  repay / draw / refresh / close / redeem with the same typed refusals the CLI prints.
-  Keeper tab: the toggle, the opts, the live Performed journal, the ALERT banner.
-  htmx-grade interactivity over the U0 API and SSE - no SPA framework, no bundler.
-  Acceptance: a swarm variant drives an open and one keeper action through the served
-  endpoints (headless HTTP), and the U0 security negatives re-run against the full app.
+- [x] **U1 - the app UI (wallet + keeper, one binary).** Static assets embedded in the
+  binary: the spec-site theme (the Didot and Plex Mono faces included from spec-site/fonts,
+  one source of truth; the heavy body serif is a fallback stack), plain HTML + vanilla JS
+  over the U0 JSON API - no framework, no bundler; the event stream is fetch-streamed per
+  the U0 contract. Two gate tiers: /api under the full token gate, the page tier (/, assets,
+  fonts) under Host/Origin only - the browser learns the token from /session.js on the same
+  origin (the page itself is inline-free), and a same-machine process is outside this
+  threat model (it can read the config's keys). The CSP pins script/style/font/connect to
+  'self' with no unsafe-inline and frame-ancestors 'none' (X-Frame-Options for older
+  engines, nosniff everywhere): no-CDN/no-telemetry and no-clickjack are browser-enforced
+  on top of the asset test that asserts no external URL. Wallet card
+  (address, balances), vault table with CR at the tick's max quote, open with collateral or
+  CR sizing, repay / draw / redeem / refresh / close, the keeper toggle with the alert
+  banner, the journal fed by the event stream (refusals arrive as `rejected`, failures as
+  `op_error`). Acceptance: the keeper e2e now bootstraps its token from the served page
+  the way a browser does and drives open + the dip heal through the same endpoints; the
+  page-tier negatives (rebinding Host before a byte is served, placeholder substitution,
+  CSP presence) run in the fast tier.
 - [ ] **U2 - the public explorer (the one hosted surface).** Read-only protocol state over
   the R1 indexer: pot / reserve / issuer, the vault table with CR bands at the latest
   assembled tick, per-slot oracle health (feed age), the liquidation event feed. Zero

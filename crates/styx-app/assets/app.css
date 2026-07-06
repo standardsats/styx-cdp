@@ -1,0 +1,111 @@
+/* STYX app - the spec-site's obsidian-water theme, distilled. Fonts are served from this
+   origin; the body face falls back to the system serif stack (the display and mono faces
+   carry the look). */
+
+@font-face {
+  font-family: "GFS Didot";
+  src: url("/fonts/didot-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: "GFS Didot";
+  src: url("/fonts/didot-greek.woff2") format("woff2");
+  unicode-range: U+0370-03FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  src: url("/fonts/plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  src: url("/fonts/plex-mono-500.woff2") format("woff2");
+}
+
+:root {
+  --bg: #0b0e12;
+  --surface: #10141a;
+  --surface2: #161b23;
+  --line: #222933;
+  --ink: #eae5d6;
+  --body: #b9b3a3;
+  --muted: #7e7b6e;
+  --gold: #c8a45c;
+  --gold-soft: rgba(200, 164, 92, 0.10);
+  --river: #7fa3bc;
+  --ok: #93ad84;
+  --warn: #c98a6a;
+  --display: "GFS Didot", "Didot", Georgia, serif;
+  --serif: Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(127,163,188,0.05), transparent 60%),
+    var(--bg);
+  color: var(--body);
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.6;
+  padding: 1.5rem;
+  max-width: 62rem;
+  margin: 0 auto;
+}
+
+header { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+h1 { font-family: var(--display); color: var(--ink); font-weight: 400; letter-spacing: 0.06em; }
+h1 .sub { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); letter-spacing: 0; }
+h2 { font-family: var(--display); color: var(--gold); font-weight: 400; font-size: 1.05rem;
+     margin-bottom: 0.6rem; letter-spacing: 0.04em; }
+
+.chainline { font-family: var(--mono); font-size: 0.8rem; color: var(--muted);
+             display: flex; gap: 1.2rem; flex-wrap: wrap; }
+.chainline b { color: var(--ink); font-weight: 500; }
+
+.badge { padding: 0.1rem 0.55rem; border: 1px solid var(--line); border-radius: 999px; }
+.badge.idle { color: var(--muted); }
+.badge.running { color: var(--ok); border-color: var(--ok); }
+.badge.alert { color: var(--warn); border-color: var(--warn); }
+
+.alert { background: var(--gold-soft); border: 1px solid var(--warn); color: var(--warn);
+         font-family: var(--mono); font-size: 0.85rem; padding: 0.6rem 0.9rem;
+         border-radius: 6px; margin-bottom: 1rem; white-space: pre-wrap; }
+.hidden { display: none; }
+
+main { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+        padding: 1rem 1.1rem; }
+.card.wide { grid-column: 1 / -1; }
+
+.row { display: flex; gap: 0.7rem; align-items: baseline; margin: 0.25rem 0; }
+.row .k { color: var(--muted); font-size: 0.85rem; min-width: 4.5rem; }
+.row b, .row code { font-family: var(--mono); color: var(--ink); font-weight: 500;
+                    word-break: break-all; }
+
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.82rem; }
+th { color: var(--muted); text-align: left; font-weight: 400; padding: 0.25rem 0.5rem 0.25rem 0; }
+td { color: var(--ink); padding: 0.3rem 0.5rem 0.3rem 0; border-top: 1px solid var(--line); }
+td.low { color: var(--warn); }
+
+form label { display: block; margin: 0.45rem 0; font-size: 0.85rem; color: var(--muted); }
+input, select { width: 100%; margin-top: 0.15rem; background: var(--surface2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 5px; padding: 0.45rem 0.6rem;
+  font-family: var(--mono); font-size: 0.85rem; }
+button { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold);
+  border-radius: 5px; padding: 0.45rem 1rem; font-family: var(--mono); font-size: 0.85rem;
+  cursor: pointer; margin-top: 0.5rem; }
+button:hover { background: rgba(200, 164, 92, 0.2); }
+button.danger { color: var(--warn); border-color: var(--warn); background: transparent; }
+.buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+#journal { list-style: none; font-family: var(--mono); font-size: 0.78rem; max-height: 16rem;
+           overflow-y: auto; }
+#journal li { padding: 0.2rem 0; border-top: 1px solid var(--line); color: var(--muted); }
+#journal li .kind { color: var(--river); margin-right: 0.6rem; }
+#journal li.rejected .kind, #journal li.op_error .kind, #journal li.keeper_error .kind { color: var(--warn); }
+#journal li.performed .kind { color: var(--ok); }
+.muted { color: var(--muted); font-size: 0.85rem; }

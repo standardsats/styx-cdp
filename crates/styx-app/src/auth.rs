@@ -61,7 +61,11 @@ impl Gate {
         self.hosts.iter().any(|h| h == host)
     }
 
-    pub fn check(&self, headers: &HeaderMap) -> Result<(), GateError> {
+    /// The page-tier check: Host (anti-rebinding) and Origin only, no token. The served
+    /// page is where the browser LEARNS the token, so it cannot require one; a foreign
+    /// process on the same machine is outside this gate's threat model either way (it can
+    /// read the config file, which holds the keys themselves).
+    pub fn check_page(&self, headers: &HeaderMap) -> Result<(), GateError> {
         let host = headers.get("host").and_then(|v| v.to_str().ok()).unwrap_or("");
         if !self.host_ok(host) {
             return Err(GateError::ForbiddenHost);
@@ -72,6 +76,11 @@ impl Gate {
                 return Err(GateError::ForbiddenOrigin);
             }
         }
+        Ok(())
+    }
+
+    pub fn check(&self, headers: &HeaderMap) -> Result<(), GateError> {
+        self.check_page(headers)?;
         match headers.get(TOKEN_HEADER).and_then(|v| v.to_str().ok()) {
             Some(t) if token_eq(t, &self.token) => Ok(()),
             _ => Err(GateError::Unauthorized),
@@ -90,6 +99,14 @@ fn token_eq(a: &str, b: &str) -> bool {
 /// The axum middleware over `Gate::check`.
 pub async fn gate(State(g): State<Arc<Gate>>, req: Request, next: Next) -> Response {
     match g.check(req.headers()) {
+        Ok(()) => next.run(req).await,
+        Err(e) => (e.status(), format!("{e:?}")).into_response(),
+    }
+}
+
+/// The page-tier middleware: `Gate::check_page`.
+pub async fn page_gate(State(g): State<Arc<Gate>>, req: Request, next: Next) -> Response {
+    match g.check_page(req.headers()) {
         Ok(()) => next.run(req).await,
         Err(e) => (e.status(), format!("{e:?}")).into_response(),
     }

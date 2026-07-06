@@ -244,6 +244,16 @@ pub struct VaultView {
     pub debt_units: u64,
     pub collateral_sats: u64,
     pub last_height: u32,
+    /// CR percent at the current tick's max quote (the liquidation-relevant side);
+    /// absent without a tick or for a zero-debt husk.
+    pub cr_percent: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct TickView {
+    pub height: u32,
+    pub lo: u32,
+    pub hi: u32,
 }
 
 #[derive(Serialize)]
@@ -262,6 +272,8 @@ pub struct Status {
     pub vaults: Vec<VaultView>,
     /// The protocol singletons; absent until the deployment is visible on this chain.
     pub protocol: Option<Protocol>,
+    /// The injected oracle tick, when fresh.
+    pub tick: Option<TickView>,
     /// Keeper mode: "idle" | "running" | "alert: <message>".
     pub keeper: String,
 }
@@ -271,6 +283,7 @@ pub struct Status {
 async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError> {
     let wallet = s.wallet.clone();
     let keeper = s.keeper_status();
+    let tick = s.tick();
     let status = tokio::task::spawn_blocking(move || -> Result<Status, WalletError> {
         // Poison recovery is sound HERE: sync() rebuilds the wallet view from the node, so
         // a panic in a previous holder leaves nothing this read path depends on. The op
@@ -278,6 +291,7 @@ async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError
         // unknown point, and continuing silently is not obviously right.
         let mut w = wallet.lock().unwrap_or_else(|e| e.into_inner());
         w.sync()?;
+        let hi = tick.as_ref().map(|t| t.price_range().1);
         let vaults = w
             .my_vaults()
             .iter()
@@ -286,6 +300,7 @@ async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError
                 debt_units: v.state.debt.raw(),
                 collateral_sats: v.value.raw(),
                 last_height: v.state.last_height.raw(),
+                cr_percent: cr_percent(v.state.debt, v.value, hi),
             })
             .collect();
         let protocol = w.protocol().ok().map(|p| Protocol {
@@ -300,6 +315,10 @@ async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError
             obol_units: w.obol_coins()?.iter().map(|(_, v)| *v).sum(),
             vaults,
             protocol,
+            tick: tick.as_ref().map(|t| {
+                let (lo, hi) = t.price_range();
+                TickView { height: t.height().raw(), lo: lo.raw(), hi: hi.raw() }
+            }),
             keeper,
         })
     })
@@ -320,6 +339,18 @@ async fn events(State(s): State<Arc<AppState>>) -> impl IntoResponse {
             .and_then(|e| Event::default().json_data(&e).ok().map(Ok::<_, std::convert::Infallible>))
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Integer CR percent: collateral against the par value of the debt at `hi`. None for a
+/// zero debt (a husk has no ratio) or without a price.
+fn cr_percent(debt: Obol, coll: Sats, hi: Option<styx_core::units::Price>) -> Option<u32> {
+    let hi = hi?;
+    let cents = debt.covenant_cents().ok().filter(|c| *c > 0)?;
+    let par = styx_core::math::coll_at_cr(cents, hi, styx_core::consts::K_PAR).raw();
+    if par == 0 {
+        return None;
+    }
+    u32::try_from(coll.raw().saturating_mul(100) / par).ok()
 }
 
 // --- the owner ops -----------------------------------------------------------------
@@ -350,6 +381,8 @@ fn op_view(report: OpReport) -> OpView {
             debt_units: v.state.debt.raw(),
             collateral_sats: v.value.raw(),
             last_height: v.state.last_height.raw(),
+            // Op responses skip the ratio; the status refresh right after carries it.
+            cr_percent: None,
         }),
     }
 }
@@ -463,8 +496,13 @@ async fn redeem(
     run_op(&s, "redeem", move |w| w.redeem(which, Obol::new(req.amount), &tick)).await
 }
 
-/// The full application router: every route behind the gate.
+/// The full application router: the token-gated API merged with the page-tier UI (its
+/// own Host/Origin-only gate).
 pub fn router(state: Arc<AppState>, g: Arc<Gate>) -> Router {
+    crate::ui::ui_router(g.clone()).merge(api_router(state, g))
+}
+
+fn api_router(state: Arc<AppState>, g: Arc<Gate>) -> Router {
     Router::new()
         .route("/api/status", get(status))
         .route("/api/events", get(events))

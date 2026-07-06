@@ -105,8 +105,22 @@ async fn the_keeper_mode_heals_a_dip_through_the_api() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let gate = Arc::new(Gate::mint(addr));
-    let api = (format!("http://{addr}"), gate.token().to_string());
     tokio::spawn(axum::serve(listener, router(state.clone(), gate)).into_future());
+
+    // Bootstrap the token the way a browser does: the page loads /session.js from the
+    // same origin (inline-free, so the CSP carries no unsafe-inline escape hatch).
+    let session = reqwest::Client::new()
+        .get(format!("http://{addr}/session.js"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let marker = "window.STYX_TOKEN=\"";
+    let at = session.find(marker).expect("session.js carries the token") + marker.len();
+    let token = session[at..at + 64].to_string();
+    let api = (format!("http://{addr}"), token);
 
     // Fund and open 4M against 1 BTC at $120k through the API (the owner side).
     let st = status(&api).await;

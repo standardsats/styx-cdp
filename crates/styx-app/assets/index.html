@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STYX</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/session.js"></script>
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header>
+  <h1>ΣΤΥΞ <span class="sub">styx v1</span></h1>
+  <div id="chain" class="chainline">
+    <span>height <b id="height">-</b></span>
+    <span>price <b id="price">-</b></span>
+    <span>pot <b id="pot">-</b></span>
+    <span>reserve <b id="reserve">-</b></span>
+    <span id="keeper-badge" class="badge idle">keeper idle</span>
+  </div>
+</header>
+
+<div id="alert" class="alert hidden"></div>
+
+<main>
+  <section class="card">
+    <h2>Wallet</h2>
+    <div class="row"><span class="k">address</span> <code id="address">-</code></div>
+    <div class="row"><span class="k">L-BTC</span> <b id="lbtc">-</b> sats</div>
+    <div class="row"><span class="k">OBOL</span> <b id="obol">-</b> units</div>
+  </section>
+
+  <section class="card">
+    <h2>Vaults</h2>
+    <table id="vaults">
+      <thead><tr><th>outpoint</th><th>debt</th><th>collateral</th><th>CR</th><th>ratchet</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="novaults" class="muted">no vaults yet</p>
+  </section>
+
+  <section class="card">
+    <h2>Open a vault</h2>
+    <form id="open-form">
+      <label>principal (OBOL units) <input name="principal" type="number" min="1" required></label>
+      <label>collateral (sats) <input name="collateral" type="number" min="1"></label>
+      <label>or CR % <input name="cr_percent" type="number" min="150" placeholder="150"></label>
+      <button>open</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Act on a vault</h2>
+    <form id="op-form">
+      <label>vault
+        <select name="vault" id="vault-select"><option value="">(only vault)</option></select>
+      </label>
+      <label>amount (OBOL units) <input name="amount" type="number" min="1"></label>
+      <div class="buttons">
+        <button data-op="repay">repay</button>
+        <button data-op="draw">draw</button>
+        <button data-op="redeem">redeem</button>
+        <button data-op="refresh">refresh</button>
+        <button data-op="close" class="danger">close</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Keeper</h2>
+    <p class="muted">poke the anchor, refresh dormant vaults, liquidate what must be liquidated -
+    on this wallet's coins.</p>
+    <button id="keeper-toggle">start keeper</button>
+  </section>
+
+  <section class="card wide">
+    <h2>Journal</h2>
+    <ul id="journal"></ul>
+  </section>
+</main>
+</body>
+</html>

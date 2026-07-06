@@ -110,9 +110,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = Node::from_url(&cfg.purse.rpc_url, cfg.purse.auth()?)?;
     tokio::spawn(tick_loop(net, node, oracle_pks, state.clone(), poll));
 
-    println!("styx-app up: http://{addr}/api/status");
-    println!("  token: {}", gate.token());
-    println!("  every request needs the X-Styx-Token header");
+    println!("styx-app up: open http://{addr}/ in your browser");
+    println!("  the page carries the session token; for curl: X-Styx-Token {}", gate.token());
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let serve = axum::serve(listener, router(state.clone(), gate));

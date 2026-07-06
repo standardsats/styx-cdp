@@ -52,6 +52,15 @@ enum Command {
         /// swarm rehearsals only: the secrets are public.
         #[arg(long)]
         test_oracles: bool,
+        /// Mine the ceremony's blocks on this node (a lone regtest/private node). Without
+        /// it the ceremony waits for whoever produces blocks on this chain - a producer
+        /// daemon or the testnet federation.
+        #[arg(long)]
+        self_mine: bool,
+        /// How long to wait for each confirmation before giving up (a stalled federation
+        /// should not kill a deployment silently at some baked-in limit).
+        #[arg(long, default_value_t = 300)]
+        confirm_timeout: u64,
     },
     /// Verify a completed config against the chain.
     Verify {
@@ -78,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = StyxnetConfig::load(&cli.config)?;
 
     match &cli.command {
-        Command::Run { reserve_seed, wallet, test_oracles } => {
+        Command::Run { reserve_seed, wallet, test_oracles, self_mine, confirm_timeout } => {
             if cfg.assets.is_some() {
                 return Err("this config is already deployed (assets present); \
                             start from a fresh skeleton to redeploy"
@@ -118,7 +127,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // A fresh wallet must scan from genesis to see the initialfreecoins output.
             let _ = node.rpc("rescanblockchain", &[]);
             let anchor = node.height()?;
-            let (ctx, protocol) = styx_node::ceremony::ceremony(&node, oracle_pks, *reserve_seed)?;
+            let confirm = if *self_mine {
+                styx_node::client::Confirm::SelfMine
+            } else {
+                styx_node::client::Confirm::Await {
+                    timeout: std::time::Duration::from_secs(*confirm_timeout),
+                }
+            };
+            let (ctx, protocol) =
+                styx_node::ceremony::ceremony(&node, oracle_pks, *reserve_seed, &confirm)?;
             cfg.network.genesis = Some(ctx.genesis.to_string());
             cfg.assets = Some(Assets {
                 obol: ctx.params.obol.to_string(),

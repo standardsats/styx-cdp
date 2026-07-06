@@ -19,6 +19,21 @@ pub const FEE: Sats = Sats::new(10_000);
 /// The wallet-level fee for setup transactions.
 pub const FEE_RPC: u64 = 100_000;
 
+/// How a broadcast gets confirmed: by mining the block ourselves (regtest, a private
+/// producer) or by waiting for whoever makes blocks on this chain (the testnet federation).
+#[derive(Debug, Clone)]
+pub enum Confirm {
+    SelfMine,
+    Await { timeout: std::time::Duration },
+}
+
+impl Confirm {
+    /// A generous default for waiting chains: several testnet block intervals.
+    pub fn await_default() -> Self {
+        Confirm::Await { timeout: std::time::Duration::from_secs(300) }
+    }
+}
+
 /// A connection to one elementsd. Daemons talk to their own machine's node by URL; the
 /// regtest harness wraps the child process it spawned. The base URL and auth are kept so a
 /// wallet-scoped client (`for_wallet`) can be derived once a wallet exists - wallet RPCs
@@ -93,31 +108,20 @@ impl Node {
             .map_err(|_| NodeError::Shape { context: "getnewaddress" })
     }
 
-    /// Broadcast; a missing-or-spent input surfaces as `Conflict` (the issuer-singleton
-    /// contention mode: re-scan, rebuild, retry), everything else as `Rejected`. Broadcast
-    /// is idempotent: a deterministic rebuild of a transaction the network already has (in
-    /// the mempool or a block) is our own tx by txid, not a failure - daemons polling
-    /// faster than blocks confirm hit this constantly.
-    ///
-    /// Both classifications match on node error strings and are therefore calibrated
-    /// against the pinned elementsd by the on-node e2e (the conflict/idempotency test);
-    /// re-run that suite on any node bump before trusting these branches.
+    /// Broadcast; contention surfaces as `Conflict` (the singleton contention mode:
+    /// re-scan, rebuild, retry), everything else as `Rejected`. Broadcast is idempotent: a
+    /// deterministic rebuild of a transaction the network already has (in the mempool or a
+    /// block) is our own tx by txid, not a failure - daemons polling faster than blocks
+    /// confirm hit this constantly.
     pub fn send(&self, tx: &Transaction) -> Result<Txid, BroadcastError> {
         match self.rpc("sendrawtransaction", &[serialize_hex(tx).into()]) {
             Ok(v) => Txid::from_str(v.as_str().unwrap_or(""))
                 .map_err(|_| NodeError::Shape { context: "sendrawtransaction" }.into()),
-            Err(NodeError::Rpc { message, .. }) => {
-                if message.contains("missingorspent") || message.contains("conflict") {
-                    Err(BroadcastError::Conflict(message))
-                } else if message.contains("already in block chain")
-                    || message.contains("already known")
-                    || message.contains("txn-already-in-mempool")
-                {
-                    Ok(tx.txid())
-                } else {
-                    Err(BroadcastError::Rejected(message))
-                }
-            }
+            Err(NodeError::Rpc { message, .. }) => match classify_broadcast(&message) {
+                BroadcastVerdict::Conflict => Err(BroadcastError::Conflict(message)),
+                BroadcastVerdict::AlreadyKnown => Ok(tx.txid()),
+                BroadcastVerdict::Rejected => Err(BroadcastError::Rejected(message)),
+            },
             Err(e) => Err(e.into()),
         }
     }
@@ -126,6 +130,45 @@ impl Node {
         let txid = self.send(tx)?;
         self.mine()?;
         Ok(txid)
+    }
+
+    /// Wait until an outpoint is confirmed (visible to `gettxout` WITHOUT the mempool -
+    /// the same visibility `scantxoutset` and the indexer have). `SelfMine` produces the
+    /// block itself: regtest and private single-producer chains. `Await` polls: chains
+    /// where someone else makes blocks (a producer daemon, the testnet federation).
+    pub fn confirm_outpoint(&self, outpoint: OutPoint, mode: &Confirm) -> Result<(), NodeError> {
+        let confirmed = |n: &Node| -> Result<bool, NodeError> {
+            let out = n.rpc(
+                "gettxout",
+                &[json!(outpoint.txid.to_string()), json!(outpoint.vout), json!(false)],
+            )?;
+            Ok(!out.is_null())
+        };
+        match mode {
+            Confirm::SelfMine => {
+                self.mine()?;
+                if confirmed(self)? {
+                    Ok(())
+                } else {
+                    Err(NodeError::Shape { context: "confirm_outpoint: absent after self-mine" })
+                }
+            }
+            Confirm::Await { timeout } => {
+                let deadline = std::time::Instant::now() + *timeout;
+                loop {
+                    if confirmed(self)? {
+                        return Ok(());
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err(NodeError::Rpc {
+                            method: "confirm_outpoint".into(),
+                            message: format!("{outpoint} unconfirmed after {timeout:?}"),
+                        });
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+        }
     }
 
     pub fn get_tx(&self, txid: Txid) -> Result<Transaction, NodeError> {
@@ -171,18 +214,19 @@ impl Node {
         ))
     }
 
+    /// Sign with the node wallet and broadcast. No mining and no confirmation: spenders of
+    /// the outputs may chain in the mempool; anything that needs confirmed visibility
+    /// (scans, the indexer) calls `confirm_outpoint` with the chain-appropriate mode.
     fn sign_and_send_hex(&self, raw: JsonValue) -> Result<Txid, NodeError> {
         let signed = self.rpc("signrawtransactionwithwallet", &[raw])?;
         let hex = signed["hex"].as_str().ok_or(NodeError::Shape { context: "sign hex" })?;
         let bytes = Vec::<u8>::from_hex(hex).map_err(|_| NodeError::Shape { context: "sign hex" })?;
         let tx: Transaction =
             deserialize(&bytes).map_err(|_| NodeError::Shape { context: "sign tx" })?;
-        let txid = match self.send(&tx) {
-            Ok(t) => t,
-            Err(e) => return Err(NodeError::Rpc { method: "send".into(), message: e.to_string() }),
-        };
-        self.mine()?;
-        Ok(txid)
+        match self.send(&tx) {
+            Ok(t) => Ok(t),
+            Err(e) => Err(NodeError::Rpc { method: "send".into(), message: e.to_string() }),
+        }
     }
 
     /// Split the biggest wallet coin in two (the two issuance prevouts).
@@ -228,7 +272,10 @@ impl Node {
         Ok(values.iter().enumerate().map(|(i, _)| OutPoint::new(txid, i as u32)).collect())
     }
 
-    /// Fund a specific scriptPubKey (seeding the reserve).
+    /// Fund a specific scriptPubKey (seeding the reserve, the wallet on-ramp). The node
+    /// wallet's spendable balance can read empty while the change of a just-broadcast
+    /// transaction awaits a block (coin selection only sees confirmed coins); on a
+    /// producing chain that resolves within a block, so wait for it, bounded.
     pub fn fund_address(
         &self,
         policy: AssetId,
@@ -236,7 +283,17 @@ impl Node {
         value: u64,
     ) -> Result<OutPoint, NodeError> {
         use styx_pset::layout::{fee_out, txin, txout};
-        let (op, sats, _) = self.biggest_coin()?;
+        let mut coin = self.biggest_coin();
+        for _ in 0..120 {
+            match &coin {
+                Err(NodeError::Shape { context }) if *context == "listunspent empty" => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    coin = self.biggest_coin();
+                }
+                _ => break,
+            }
+        }
+        let (op, sats, _) = coin?;
         let tx = Transaction {
             version: 2,
             lock_time: styx_core::elements::LockTime::ZERO,
@@ -275,6 +332,43 @@ impl Node {
         };
         let txid = self.sign_and_send_hex(serialize_hex(&tx).into())?;
         self.find(txid, &op_true(), total)
+    }
+}
+
+/// How a node's broadcast rejection reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BroadcastVerdict {
+    /// Someone else's transaction holds our inputs (spent, in the mempool, or winning an
+    /// RBF race): the contention mode the retry machinery resolves by resync + rebuild.
+    Conflict,
+    /// The network already has this exact transaction: idempotent success.
+    AlreadyKnown,
+    /// A genuine refusal (covenant, standardness): a builder invariant broke.
+    Rejected,
+}
+
+/// Classify a sendrawtransaction error string. Everything here matches node error text and
+/// is therefore calibrated against the pinned elementsd by the on-node e2e (the
+/// conflict/idempotency test); re-run that suite on any node bump before trusting these
+/// branches. The conflict class deliberately covers every same-inputs contention shape:
+/// with several keepers racing on minute-long testnet blocks, mempool conflicts and lost
+/// RBF races are the environment, not an anomaly - misreading them as Rejected would
+/// alert-stop a healthy daemon.
+pub fn classify_broadcast(message: &str) -> BroadcastVerdict {
+    if message.contains("missingorspent")
+        || message.contains("txn-mempool-conflict")
+        || message.contains("insufficient fee, rejecting replacement")
+        || message.contains("conflict")
+    {
+        BroadcastVerdict::Conflict
+    } else if message.contains("already in block chain")
+        || message.contains("already known")
+        || message.contains("already-known")
+        || message.contains("txn-already-in-mempool")
+    {
+        BroadcastVerdict::AlreadyKnown
+    } else {
+        BroadcastVerdict::Rejected
     }
 }
 

@@ -62,7 +62,7 @@ impl Wallet {
     /// OPEN a vault. The frozen layout needs exact funding (collateral + 0.5% borrow fee at
     /// the min quote + tx fee); if no coin matches exactly, a shaping self-spend makes one
     /// first and the open chains on it in the mempool.
-    pub fn open(
+    fn open_once(
         &mut self,
         principal: Obol,
         collateral: Sats,
@@ -113,7 +113,7 @@ impl Wallet {
         Ok(coll_at_cr(principal.covenant_cents()?, lo, k))
     }
 
-    pub fn repay(&mut self, which: Option<OutPoint>, amount: Obol) -> Result<OpReport, WalletError> {
+    fn repay_once(&mut self, which: Option<OutPoint>, amount: Obol) -> Result<OpReport, WalletError> {
         let protocol = self.protocol()?;
         let vault = self.pick_vault(which)?;
         let (payer_op, payer_val) = self.ensure_obol(amount.raw())?;
@@ -142,7 +142,7 @@ impl Wallet {
         Ok(OpReport { txid, vault: Some(built.expected.vault) })
     }
 
-    pub fn draw(
+    fn draw_once(
         &mut self,
         which: Option<OutPoint>,
         amount: Obol,
@@ -161,7 +161,7 @@ impl Wallet {
         Ok(OpReport { txid, vault: Some(built.expected.vault) })
     }
 
-    pub fn refresh(
+    fn refresh_once(
         &mut self,
         which: Option<OutPoint>,
         tick: &OracleTick,
@@ -183,7 +183,7 @@ impl Wallet {
     }
 
     /// CLOSE: repay the full debt, free the collateral to the funding spk.
-    pub fn close(&mut self, which: Option<OutPoint>) -> Result<OpReport, WalletError> {
+    fn close_once(&mut self, which: Option<OutPoint>) -> Result<OpReport, WalletError> {
         let protocol = self.protocol()?;
         let vault = self.pick_vault(which)?;
         let (payer_op, payer_val) = self.ensure_obol(vault.state.debt.raw())?;
@@ -206,7 +206,7 @@ impl Wallet {
     /// REDEEM `x` against one of our vaults (permissionless op, but building it needs the
     /// full vault state, so a foreign vault would need its owner bytes - out of this
     /// wallet's reach by design).
-    pub fn redeem(
+    fn redeem_once(
         &mut self,
         which: Option<OutPoint>,
         x: Obol,
@@ -306,5 +306,77 @@ impl Wallet {
             slots: vec![],
         };
         self.sign_and_broadcast(&plan)
+    }
+}
+
+/// The public ops: each `*_once` body wrapped in the shared conflict-retry. A Conflict on
+/// broadcast is singleton contention (the pot and the issuer serialize every open and draw
+/// GLOBALLY - with a crowd on one chain this is the normal case, not the exception):
+/// resync, re-select coins and the vault, rebuild against fresh state, retry. The lost-race
+/// policy is Error: an owner's vault dissolving mid-op wants the user's eyes.
+impl Wallet {
+    pub fn open(
+        &mut self,
+        principal: Obol,
+        collateral: Sats,
+        tick: &OracleTick,
+    ) -> Result<OpReport, WalletError> {
+        self.with_retry("open", |w| w.open_once(principal, collateral, tick))
+    }
+
+    pub fn repay(&mut self, which: Option<OutPoint>, amount: Obol) -> Result<OpReport, WalletError> {
+        self.with_retry("repay", |w| w.repay_once(which, amount))
+    }
+
+    pub fn draw(
+        &mut self,
+        which: Option<OutPoint>,
+        amount: Obol,
+        tick: &OracleTick,
+    ) -> Result<OpReport, WalletError> {
+        self.with_retry("draw", |w| w.draw_once(which, amount, tick))
+    }
+
+    pub fn refresh(
+        &mut self,
+        which: Option<OutPoint>,
+        tick: &OracleTick,
+    ) -> Result<OpReport, WalletError> {
+        self.with_retry("refresh", |w| w.refresh_once(which, tick))
+    }
+
+    pub fn close(&mut self, which: Option<OutPoint>) -> Result<OpReport, WalletError> {
+        self.with_retry("close", |w| w.close_once(which))
+    }
+
+    pub fn redeem(
+        &mut self,
+        which: Option<OutPoint>,
+        x: Obol,
+        tick: &OracleTick,
+    ) -> Result<OpReport, WalletError> {
+        self.with_retry("redeem", |w| w.redeem_once(which, x, tick))
+    }
+
+    fn with_retry(
+        &mut self,
+        what: &'static str,
+        mut op: impl FnMut(&mut Self) -> Result<OpReport, WalletError>,
+    ) -> Result<OpReport, WalletError> {
+        let mut out = None;
+        crate::wallet::retry_conflicts(
+            what,
+            self,
+            |w| w.sync().map(|_| ()),
+            |w| {
+                let report = op(w)?;
+                let txid = report.txid;
+                out = Some(report);
+                Ok(txid)
+            },
+            crate::wallet::LostRace::Error,
+        )?;
+        // Under LostRace::Error a success always carries the report.
+        out.ok_or(WalletError::ConflictExhausted { what, attempts: crate::wallet::CONFLICT_ATTEMPTS })
     }
 }

@@ -18,13 +18,11 @@ use styx_core::domain::{OnChain, VaultState};
 use styx_core::elements::{OutPoint, Txid};
 use styx_core::oracle::OracleTick;
 use styx_core::units::{BlockHeight, Obol, Sats};
-use styx_node::BroadcastError;
 use styx_pset::build;
-use styx_pset::error::BuildError;
 use styx_pset::intent::{
     BadDebtIntent, FullLiqIntent, FundingCoin, LiquidateIntent, ObolCoin, PokeIntent, RefreshIntent,
 };
-use styx_wallet::wallet::{Wallet, WalletError, FEE};
+use styx_wallet::wallet::{retry_conflicts, LostRace, Wallet, WalletError, FEE};
 use styx_watch::quotes::{QuoteBook, WireQuote};
 use styx_watch::transport::QuoteTransport;
 
@@ -94,8 +92,6 @@ pub enum KeeperError {
 /// of the intended full stop.
 pub const REJECTED_EXIT: i32 = 65;
 
-const CONFLICT_ATTEMPTS: u32 = 3;
-
 /// How many blocks an acted-on vault stays off limits while its spend awaits a block.
 /// Normally the spend confirms with the next block and the outpoint leaves the index; if
 /// the transaction fell out of the mempool instead, the keeper retries after this many.
@@ -109,12 +105,30 @@ pub struct Keeper {
     /// Polling faster than blocks confirm must not re-act on the same vault: the rebuild
     /// either duplicates the transaction or self-conflicts in the mempool.
     acted: std::collections::BTreeMap<OutPoint, u32>,
+    /// The poke's mirror of `acted`: (the anchor when we poked, the height acted at).
+    /// Until the anchor moves - our poke confirmed, or someone else's did - the lag is
+    /// still measured against the OLD anchor and every step would re-poke into its own
+    /// unconfirmed transaction.
+    poked: Option<(BlockHeight, u32)>,
+    /// The height of the last executed action. One action per BLOCK is the operating
+    /// invariant (the module doc's "one action per step" is necessary but not sufficient
+    /// when polling outpaces blocks): a second action in the same block would fight the
+    /// first over the purse's coins - the confirmed-coin scan cannot see our own pending
+    /// spends - and burn its conflict retries against our own mempool.
+    last_acted_height: Option<u32>,
 }
 
 impl Keeper {
     pub fn new(purse: Wallet, opts: KeeperOpts) -> Self {
         let book = QuoteBook::new(purse.ctx.params.oracle_pks);
-        Keeper { purse, book, opts, acted: std::collections::BTreeMap::new() }
+        Keeper {
+            purse,
+            book,
+            opts,
+            acted: std::collections::BTreeMap::new(),
+            poked: None,
+            last_acted_height: None,
+        }
     }
 
     /// Feed one incoming quote into the book (verification inside; rejects are dropped).
@@ -146,6 +160,10 @@ impl Keeper {
     pub fn step(&mut self, tick: &OracleTick) -> Result<Option<Performed>, KeeperError> {
         self.purse.sync()?;
         let height = self.purse.state.height;
+        // One action per block: if we already acted at this height, wait for it to land.
+        if self.last_acted_height == Some(height) {
+            return Ok(None);
+        }
         // An acted-on outpoint that left the index confirmed; one that lingered past the
         // retry window is fair game again (the broadcast evidently went nowhere).
         let vaults_now = &self.purse.state.vaults;
@@ -175,9 +193,19 @@ impl Keeper {
         }
 
         // Duties: the mint-anchor poke outranks refreshes (every issuer-gated op feeds on
-        // its freshness), then the first stale healthy vault.
-        if tick.height().raw().saturating_sub(anchor.raw()) > self.opts.poke_lag {
+        // its freshness), then the first stale healthy vault. A pending poke (anchor
+        // unchanged since we broadcast, within the retry window) sits out like an acted
+        // vault does.
+        self.poked = self.poked.filter(|(at_anchor, at_height)| {
+            *at_anchor == anchor && height < at_height.saturating_add(ACTED_RETRY_BLOCKS)
+        });
+        if self.poked.is_none() && tick.height().raw().saturating_sub(anchor.raw()) > self.opts.poke_lag
+        {
             let txid = self.with_retry("poke", |k| k.build_poke(tick))?;
+            if txid.is_some() {
+                self.poked = Some((anchor, height));
+                self.last_acted_height = Some(height);
+            }
             return Ok(txid.map(|txid| Performed::Poked { txid }));
         }
         let stale = vaults
@@ -202,6 +230,7 @@ impl Keeper {
         let done = self.execute(vault, action, tick)?;
         if done.is_some() {
             self.acted.insert(vault, height);
+            self.last_acted_height = Some(height);
         }
         Ok(done)
     }
@@ -357,45 +386,22 @@ impl Keeper {
         self.purse.sign_and_broadcast(&built.plan)
     }
 
+    /// The shared conflict-retry (styx-wallet's), with the keeper's lost-race policy:
+    /// losing a liquidation race to another keeper is the system working. The wallet-level
+    /// alert variants map onto the keeper's (a Rejected keeps its exit-65 semantics).
     fn with_retry(
         &mut self,
         what: &'static str,
-        f: impl Fn(&mut Self) -> Result<Txid, WalletError>,
+        f: impl FnMut(&mut Self) -> Result<Txid, WalletError>,
     ) -> Result<Option<Txid>, KeeperError> {
-        retry_conflicts(what, self, |k| k.purse.sync().map(|_| ()), f)
+        retry_conflicts(what, self, |k| k.purse.sync().map(|_| ()), f, LostRace::Benign).map_err(|e| {
+            match e {
+                WalletError::Rejected { what, message } => KeeperError::Rejected { what, message },
+                WalletError::ConflictExhausted { what, attempts } => {
+                    KeeperError::ConflictExhausted { what, attempts }
+                }
+                e => KeeperError::Wallet(e),
+            }
+        })
     }
-}
-
-/// The conflict-retry policy, free-standing so it is testable without a node. `Ok(None)`
-/// means the work turned out to be done by someone else: after a conflict-triggered resync,
-/// the target vault vanishing is the success case of losing a race, not a failure.
-pub fn retry_conflicts<S>(
-    what: &'static str,
-    state: &mut S,
-    resync: impl Fn(&mut S) -> Result<(), WalletError>,
-    f: impl Fn(&mut S) -> Result<Txid, WalletError>,
-) -> Result<Option<Txid>, KeeperError> {
-    for attempt in 0..CONFLICT_ATTEMPTS {
-        match f(state) {
-            Ok(txid) => return Ok(Some(txid)),
-            Err(WalletError::Broadcast(BroadcastError::Conflict(m))) => {
-                eprintln!("{what}: conflict ({m}), resync + rebuild ({attempt})");
-                resync(state)?;
-            }
-            Err(WalletError::Broadcast(BroadcastError::Rejected(message))) => {
-                return Err(KeeperError::Rejected { what, message });
-            }
-            // The target vanished while retrying: another keeper got there first.
-            Err(WalletError::VaultNotFound(_) | WalletError::VaultNotMine(_)) if attempt > 0 => {
-                return Ok(None);
-            }
-            // Same lost race, refresh-shaped: the rebuild found the ratchet already
-            // advanced past our tick by whoever won.
-            Err(WalletError::Build(BuildError::RatchetNotAdvanced { .. })) if attempt > 0 => {
-                return Ok(None);
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-    Err(KeeperError::ConflictExhausted { what, attempts: CONFLICT_ATTEMPTS })
 }

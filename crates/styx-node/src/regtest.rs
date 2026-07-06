@@ -45,8 +45,13 @@ pub fn deploy(reserve_seed: u64) -> Deployment {
     node.rpc("rescanblockchain", &[]).expect("rescan");
 
     let oracle_keys = [keypair(7), keypair(8), keypair(9), keypair(101), keypair(102)];
-    let (ctx, protocol) =
-        ceremony(&node, oracle_keys.map(|k| k.x_only_public_key().0), reserve_seed).expect("ceremony");
+    let (ctx, protocol) = ceremony(
+        &node,
+        oracle_keys.map(|k| k.x_only_public_key().0),
+        reserve_seed,
+        &crate::client::Confirm::SelfMine,
+    )
+    .expect("ceremony");
     Deployment { daemon, node, ctx, protocol, oracle_keys }
 }
 

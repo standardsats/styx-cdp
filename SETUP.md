@@ -44,31 +44,41 @@ trusted LAN, never public.
 1. Generate RPC credentials (`share/rpcauth/rpcauth.py styx`), paste the `rpcauth=` line
    into the producer config, start the node:
 
-       elementsd -datadir=/var/lib/styxnet        # deploy/systemd/elementsd.service
+   ```bash
+   elementsd -datadir=/var/lib/styxnet   # deploy/systemd/elementsd.service
+   ```
 
 2. Start the relay with `deploy/nostr-relay.toml.example` adjusted for the host:
 
-       nostr-rs-relay --config /etc/styx/nostr-relay.toml
-                                                  # deploy/systemd/nostr-rs-relay.service
+   ```bash
+   nostr-rs-relay --config /etc/styx/nostr-relay.toml   # deploy/systemd/nostr-rs-relay.service
+   ```
 
 3. Collect the oracle identities. On each oracle machine run `styx-oracle --keygen`, keep
    the secrets there, and send the two printed public keys to the operator. Fill
    `deploy/styxnet.skeleton.toml`: five oracle entries (slot, protocol_pk, nostr_pk,
    admin_url) and the relay URL.
 
-4. Run the ceremony and verify it:
+4. Start block production (machine A only; it mines to its own `producer` wallet):
 
-       styx-deploy --rpc-url http://127.0.0.1:18884 --rpc-user styx --rpc-password ... \
-           --config styxnet.toml run --reserve-seed 18000000
-       styx-deploy ... --config styxnet.toml verify
+   ```bash
+   produce-blocks.sh /var/lib/styxnet 10   # deploy/systemd/styx-produce-blocks.service
+   ```
+
+5. Run the ceremony and verify it. The ceremony broadcasts and WAITS for the producer's
+   blocks to confirm each step - the same path a public-testnet deployment takes, where
+   the federation makes the blocks (a lone node with nothing producing passes
+   `--self-mine` instead):
+
+   ```bash
+   styx-deploy --rpc-url http://127.0.0.1:18884 --rpc-user styx --rpc-password ... \
+       --config styxnet.toml run --reserve-seed 18000000
+   styx-deploy ... --config styxnet.toml verify
+   ```
 
    `run` executes the two issuances and seeds the reserve, completing styxnet.toml in
    place; `verify` recompiles the artifacts from the completed file and locates the
    protocol singletons on chain. Distribute the completed `styxnet.toml` to every machine.
-
-5. Start block production (machine A only):
-
-       produce-blocks.sh /var/lib/styxnet 10      # deploy/systemd/styx-produce-blocks.service
 
 ## 2. Machines B1..B5: the oracles
 
@@ -81,7 +91,9 @@ Each oracle machine runs a follower node and one daemon:
    URL, the local RPC credentials.
 3. Start the daemon (`deploy/systemd/styx-oracle.service`):
 
-       styx-oracle --config /etc/styx/oracle.toml
+   ```bash
+   styx-oracle --config /etc/styx/oracle.toml
+   ```
 
    It signs the configured price at every new block and publishes to the relay. Check:
    `curl http://127.0.0.1:9700/health` shows the advancing height.
@@ -95,17 +107,21 @@ Each oracle machine runs a follower node and one daemon:
    operator: print the funding address here, send from machine A's deploy wallet, and the
    coins land after the next block.
 
-       styx-wallet --config wallet.toml address
-       # on machine A (amount in BTC units):
-       elements-cli -datadir=/var/lib/styxnet -rpcwallet=styx-deploy \
-           sendtoaddress <funding address> 2.0
+   ```bash
+   styx-wallet --config wallet.toml address
+   # on machine A (amount in BTC units):
+   elements-cli -datadir=/var/lib/styxnet -rpcwallet=styx-deploy \
+       sendtoaddress <funding address> 2.0
+   ```
 
    (`styx-wallet fund` also exists, but it draws from the LOCAL node wallet - useful only
    where that wallet actually holds coins, i.e. machine A or a one-host setup.)
 4. Use:
 
-       styx-wallet --config wallet.toml open --principal 4000000 --collateral 100000000
-       styx-wallet --config wallet.toml status
+   ```bash
+   styx-wallet --config wallet.toml open --principal 4000000 --collateral 100000000
+   styx-wallet --config wallet.toml status
+   ```
 
    Ticks come from the relay (a 3-of-5 quorum near the tip is required); every command
    syncs the indexer snapshot before acting. `open` sizes the exact funding coin itself.
@@ -118,13 +134,17 @@ Each oracle machine runs a follower node and one daemon:
    for liquidations from any wallet. The keeper config is wallet-shaped, so the wallet CLI
    reads it:
 
-       styx-wallet --config keeper.toml address
-       # on machine A: elements-cli ... sendtoaddress <purse address> 0.1
-       # from the user wallet: styx-wallet --config wallet.toml send --to <purse address> --amount N
+   ```bash
+   styx-wallet --config keeper.toml address
+   # on machine A: elements-cli ... sendtoaddress <purse address> 0.1
+   # from the user wallet: styx-wallet --config wallet.toml send --to <purse address> --amount N
+   ```
 
 4. Start the daemon (`deploy/systemd/styx-keeper.service`):
 
-       styx-keeper --config /etc/styx/keeper.toml
+   ```bash
+   styx-keeper --config /etc/styx/keeper.toml
+   ```
 
    It pokes the mint anchor toward the tip, refreshes dormant healthy vaults, and walks
    the liquidation ladder when the price moves. One action per block by design; a
@@ -135,8 +155,10 @@ Each oracle machine runs a follower node and one daemon:
 
 All five oracles follow their configured price until moved:
 
-    deploy/scenario-crash.sh styxnet.toml 50000   # the partial band: the keeper heals
-    deploy/scenario-crash.sh styxnet.toml 35000   # under water: bad-debt closes the vault
+```bash
+deploy/scenario-crash.sh styxnet.toml 50000   # the partial band: the keeper heals
+deploy/scenario-crash.sh styxnet.toml 35000   # under water: bad-debt closes the vault
+```
 
 Watch the cascade in the keeper journal and in `styx-wallet status`. The reserve pays the
 keeper the shortfall cover on a bad debt; the pot returns to the full supply once every
@@ -146,7 +168,9 @@ debt is burned.
 
 Inside `nix develop`:
 
-    deploy/swarm.sh [workdir]
+```bash
+deploy/swarm.sh [workdir]
+```
 
 launches the whole topology as local processes (chain, relay, 5 oracles, wallet, keeper),
 opens a vault, hands the principal to the keeper, and drives the crash cascade end to

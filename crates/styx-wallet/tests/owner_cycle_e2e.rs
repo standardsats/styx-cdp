@@ -79,8 +79,9 @@ fn full_owner_cycle_through_the_wallet() {
     assert!(w.protocol().is_ok(), "the ceremony is indexed from genesis");
     assert!(w.my_vaults().is_empty());
 
-    // Fund the wallet's p2tr key from the node wallet (fund_address mines its own block).
+    // Fund the wallet's p2tr key from the node wallet (broadcast only; we mine).
     w.fund(200_000_000).expect("fund");
+    dep.node.mine().unwrap(); // fund broadcasts only; the coin scan needs a confirmation
     w.sync().unwrap();
     assert_eq!(w.lbtc_coins().unwrap().len(), 1);
 
@@ -125,20 +126,56 @@ fn full_owner_cycle_through_the_wallet() {
     assert_eq!(vault.state.last_height.raw(), h);
     assert_eq!(w.my_vaults(), vec![vault]);
 
-    // REDEEM $5k against our own vault at par. The redeemer coin is the 1M draw coin, so
-    // 0.5M comes back as OBOL change - deliberately fragmenting the wallet.
+    // Conflict retry, deterministically: a poke lands while the wallet's view is stale
+    // (the issuer singleton serializes every mint globally - with a crowd on one chain
+    // this is the normal case). The first draw attempt spends the outdated issuer
+    // outpoint and conflicts; the retry resyncs, rebuilds, and lands.
+    {
+        use styx_node::client::{op_true, FEE};
+        use styx_pset::intent::{FundingCoin, PokeIntent};
+        let fee_coins = dep.node.fund_optrue(dep.ctx.params.policy, &[1_000_000]).unwrap();
+        let h = dep.node.height().unwrap();
+        let built = styx_pset::build::poke::poke(
+            &dep.ctx,
+            &w.protocol().unwrap().issuer,
+            &PokeIntent {
+                tick: dep.tick(h, 120_000),
+                funding: FundingCoin {
+                    outpoint: fee_coins[0],
+                    value: styx_core::units::Sats::new(1_000_000),
+                    spk: op_true(),
+                },
+                change_spk: op_true(),
+                fee: FEE,
+            },
+        )
+        .unwrap();
+        let tx = styx_pset::finalize::finalize(&dep.ctx, &built.plan).unwrap();
+        dep.node.send_and_mine(&tx).unwrap();
+    }
+    // No sync here: the wallet must discover the moved issuer through the conflict.
+    let h = dep.node.height().unwrap();
+    let report = w.draw(None, Obol::new(500_000), &dep.tick(h, 120_000)).expect("draw after conflict");
+    dep.node.mine().unwrap();
+    w.sync().unwrap();
+    let vault = report.vault.unwrap();
+    assert_eq!(vault.state.debt, Obol::new(4_500_000));
+    assert_eq!(w.my_vaults(), vec![vault]);
+
+    // REDEEM $5k against our own vault at par. The redeemer coin is the 0.5M draw coin
+    // (spent exactly, no change), leaving the wallet's OBOL fragmented as {3M, 1M}.
     let h = dep.node.height().unwrap();
     let report = w.redeem(None, Obol::new(500_000), &dep.tick(h, 120_000)).expect("redeem");
     dep.node.mine().unwrap();
     w.sync().unwrap();
     let vault = report.vault.unwrap();
-    assert_eq!(vault.state.debt, Obol::new(3_500_000));
+    assert_eq!(vault.state.debt, Obol::new(4_000_000));
 
-    // CLOSE needs a single 3.5M OBOL coin but the wallet holds {3M, 0.5M}: solvent yet
+    // CLOSE needs a single 4M OBOL coin but the wallet holds {3M, 1M}: solvent yet
     // fragmented, so the consolidation self-spend runs first and the close chains on it.
     let obol = w.obol_coins().unwrap();
     assert_eq!(obol.len(), 2, "the fragmented shape this exercises: {obol:?}");
-    assert!(obol.iter().all(|(_, v)| *v < 3_500_000));
+    assert!(obol.iter().all(|(_, v)| *v < 4_000_000));
     w.close(None).expect("close");
     dep.node.mine().unwrap();
     w.sync().unwrap();

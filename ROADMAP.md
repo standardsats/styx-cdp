@@ -159,8 +159,32 @@ deploy/ configs.
   evicted transaction retries). New seams the swarm needed: `styx-wallet send` (OBOL/L-BTC
   to any address; the keeper smoke now covers it on node) and `styx-oracle --keygen`.
 
-Out of scope for this phase: FROST / multisig of the oracle protocol key, a real price feed
-(behind a PriceSource trait), authentication of the oracle admin surface (it signs on demand
-and moves the price, so it binds loopback / trusted LAN until then), confidential change
-outputs, and automated redeem arbitrage by the keeper (the decision ladder leaves room to
-add it).
+The role-daemon phase is complete. The testnet phase (T0-T2 below) takes the system to the
+public Liquid testnet, where strangers open vaults and liquidate each other.
+
+- [x] **T0 - testnet seams + wallet conflict retry.** The mining assumptions are gone:
+  broadcast helpers only broadcast, and the ceremony takes a Confirm mode - self-mine on a
+  lone regtest node, await-confirmation where someone else makes blocks (the swarm now
+  runs its producer first and rehearses exactly the path a federation-chain deployment
+  takes; styx-deploy defaults to awaiting, `--self-mine` for the lone-node case). The
+  indexer starts at the deployment anchor from styxnet.toml instead of genesis (the real
+  testnet is millions of blocks deep; the reindex e2e proves anchor-start equals the full
+  scan). Address display/parse follows network.chain (ex / tex / ert). The conflict retry
+  moved into the wallet as the shared policy - resync, rebuild, bounded attempts - with a
+  LostRace split: benign for a keeper (someone else did the work), an error for an owner
+  (a vault dissolving mid-op wants eyes); the issuer singleton serializes every open and
+  draw globally, and the owner-cycle e2e now manufactures that contention deterministically
+  (a poke lands under a stale wallet view; the eventual draw conflicts, resyncs, lands).
+- [ ] **T1 - price feed with scenario override.** A real feed behind the PriceSource seam
+  (per-oracle, so quorum divergence stays honest), with the admin POST /price kept as a
+  manual override for staged crashes on the private network.
+- [ ] **T2 - public infrastructure.** Relay behind TLS, oracle hosts, the published
+  completed liquid-testnet.toml, tL-BTC bootstrap (faucet -> the wallet's unblinded
+  funding address; confidential faucet coins cannot enter the raw funding paths), OBOL
+  distribution for keepers, a user-facing testnet quickstart, monitoring, and a soak run
+  before inviting anyone.
+
+Out of scope for these phases: FROST / multisig of the oracle protocol key, authentication
+of the oracle admin surface (it signs on demand and moves the price, so it binds loopback /
+trusted LAN until then), confidential change outputs, and automated redeem arbitrage by the
+keeper (the decision ladder leaves room to add it).

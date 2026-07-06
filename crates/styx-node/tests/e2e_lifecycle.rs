@@ -49,6 +49,7 @@ fn scanner_refuses_a_fragmented_reserve_and_ignores_dust() {
     // Foreign-asset dust at the pot and issuer addresses: a griefer can always send it, and
     // the scanner's asset filter must keep the snapshot identical.
     dep.node.fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.pot_spk(), 1_000).expect("pot dust");
+    dep.node.mine().expect("confirm pot dust"); // the next fund only sees confirmed coins
     dep.node
         .fund_address(
             dep.ctx.params.policy,
@@ -56,6 +57,7 @@ fn scanner_refuses_a_fragmented_reserve_and_ignores_dust() {
             1_000,
         )
         .expect("issuer dust");
+    dep.node.mine().expect("confirm dust"); // fund_address broadcasts only now
     let scanned = scan_protocol(&dep.node, &dep.ctx, dep.protocol.issuer.state).expect("scan");
     assert_eq!(scanned, dep.protocol, "dust must not move the snapshot");
 
@@ -63,6 +65,7 @@ fn scanner_refuses_a_fragmented_reserve_and_ignores_dust() {
     dep.node
         .fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.stability_spk(), 500_000)
         .expect("fragment");
+    dep.node.mine().expect("confirm fragment");
     match scan_protocol(&dep.node, &dep.ctx, dep.protocol.issuer.state) {
         Err(styx_node::ScanError::ReserveFragmented { count: 2 }) => {}
         other => panic!("expected ReserveFragmented, got {other:?}"),

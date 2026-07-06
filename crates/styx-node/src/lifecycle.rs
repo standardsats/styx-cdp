@@ -45,6 +45,15 @@ fn obol(outpoint: OutPoint, value: u64) -> ObolCoin {
 /// accepted.
 fn broadcast(dep: &Deployment, plan: &TxPlan) -> Transaction {
     let tx = finalize(&dep.ctx, plan).expect("prune accepts");
+    // The flat FEE must clear 1 sat/vb on every real op INCLUDING its Simplicity witnesses
+    // (kilobytes per covenant input) - the public testnet relays at 0.1 sat/vb, so this
+    // asserts a 10x margin. If an op ever trips this, the runtime FEE needs raising.
+    assert!(
+        FEE.raw() as usize >= tx.vsize(),
+        "flat FEE {} under 1 sat/vb for a {}-vb transaction",
+        FEE.raw(),
+        tx.vsize()
+    );
     if let Err(e) = dep.node.send_and_mine(&tx) {
         for (i, input) in tx.input.iter().enumerate() {
             let o = &input.previous_output;

@@ -88,7 +88,9 @@ fn reindex_from_genesis_matches_the_lifecycle_trace() {
     snapshot::save(&state, &path).unwrap();
 
     dep.node.fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.pot_spk(), 1_000).unwrap();
+    dep.node.mine().unwrap(); // the next fund only sees confirmed coins
     dep.node.fund_address(dep.ctx.params.policy, &dep.ctx.artifacts.stability_spk(), 500_000).unwrap();
+    dep.node.mine().unwrap(); // fund_address broadcasts only now
 
     let mut resumed = snapshot::load(&path).unwrap();
     assert_eq!(resumed, state);
@@ -101,5 +103,12 @@ fn reindex_from_genesis_matches_the_lifecycle_trace() {
     let mut fresh = IndexState::genesis(dep.node.genesis().unwrap());
     catch_up(&dep.node, &dep.ctx, &owners, &mut fresh).unwrap();
     assert_eq!(fresh, resumed);
+
+    // Starting at the deployment anchor instead of genesis lands on the same state:
+    // nothing protocol-relevant precedes the ceremony (the testnet fast-sync path).
+    let anchor = dep.protocol.issuer.state.last_mint_height.raw();
+    let mut from_anchor = IndexState::at_height(anchor, dep.node.block_hash(anchor).unwrap());
+    catch_up(&dep.node, &dep.ctx, &owners, &mut from_anchor).unwrap();
+    assert_eq!(from_anchor, fresh);
     std::fs::remove_dir_all(&dir).unwrap();
 }

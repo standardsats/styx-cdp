@@ -115,6 +115,7 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
             Wallet::open_session(&role_config(&dep, &dir, "wallet", 0x1a)).expect("wallet session");
         wallet.sync().unwrap();
         wallet.fund(200_000_000).expect("fund wallet");
+        dep.node.mine().unwrap();
         wallet.sync().unwrap();
         let h = dep.node.height().unwrap();
         let opened = wallet
@@ -130,6 +131,7 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
             KeeperOpts { poke_lag: 2, refresh_lag: 3, walkback: 8 },
         );
         keeper.purse.fund(5_000_000).expect("keeper fee funds");
+        dep.node.mine().unwrap();
 
         // The wallet hands its 4M OBOL principal to the keeper (the market, abridged) -
         // through the CLI-facing send op.
@@ -151,6 +153,12 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
         publish_quorum(&dep, &hub, 120_000).await;
         let done = keeper_pass(&mut keeper, &mut endpoint).await;
         assert!(matches!(done, Some(Performed::Poked { .. })), "expected a poke, got {done:?}");
+
+        // Same tick, NO block yet: one action per block - the pending poke sits out (the
+        // anchor still reads old) and nothing else runs either (a second action would
+        // fight the first over the purse's coins in the mempool).
+        let done = keeper_pass(&mut keeper, &mut endpoint).await;
+        assert_eq!(done, None, "one action per block");
         dep.node.mine().unwrap();
 
         // Anchor fresh now; the dormant healthy vault is next: the refresh duty (M-2).

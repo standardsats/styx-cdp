@@ -9,8 +9,12 @@ no multisig, federation, or admin keys.
   model, reserve economics, security analysis).
 - `covenants/` - the five frozen v1 SimplicityHL covenants. Behaviourally frozen; a golden-CMR
   test enforces it.
-- `crates/` - the implementation: pure protocol core, PSET transaction builders, node adapter.
-  See [ARCHITECTURE.md](ARCHITECTURE.md).
+- `crates/` - the implementation: pure protocol core, PSET transaction builders, node adapter,
+  and the role daemons (oracle, wallet, keeper). See [ARCHITECTURE.md](ARCHITECTURE.md).
+- [GUIDE.md](GUIDE.md) - the hands-on walkthrough: deploy, oracles, a vault and every op on
+  it, the keeper, a price-crash liquidation.
+- [SETUP.md](SETUP.md) - multi-machine network bring-up; `deploy/swarm.sh` rehearses the
+  whole topology on one host.
 - [ROADMAP.md](ROADMAP.md) - milestone status.
 
 ## Building

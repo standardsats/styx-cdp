@@ -157,17 +157,18 @@ done
   echo "relays = [\"ws://127.0.0.1:$RELAY_PORT\"]"
 } >> "$WORK/styxnet.toml"
 
-# --- 4. the ceremony ------------------------------------------------------------------
-log "deploying the protocol"
+# --- 4. block production, then the ceremony ---------------------------------------------
+# The producer runs first (its own wallet) and the ceremony WAITS for its blocks - the
+# same await-confirmation path a testnet deployment takes, rehearsed here.
+ELEMENTS_CLI=elements-cli "$ROOT/deploy/produce-blocks.sh" "$WORK/node" "$BLOCK_INTERVAL" \
+  > "$WORK/producer.log" 2>&1 &
+PIDS+=($!)
+
+log "deploying the protocol (awaiting producer blocks)"
 "$BIN/styx-deploy" --rpc-url "$RPC" --rpc-user styx --rpc-password styx \
   --config "$WORK/styxnet.toml" run --reserve-seed 18000000
 "$BIN/styx-deploy" --rpc-url "$RPC" --rpc-user styx --rpc-password styx \
   --config "$WORK/styxnet.toml" verify
-
-# Block production starts after the ceremony created the node wallet it mines to.
-ELEMENTS_CLI=elements-cli "$ROOT/deploy/produce-blocks.sh" "$WORK/node" "$BLOCK_INTERVAL" \
-  > "$WORK/producer.log" 2>&1 &
-PIDS+=($!)
 
 # --- 5. the oracles --------------------------------------------------------------------
 for i in 0 1 2 3 4; do

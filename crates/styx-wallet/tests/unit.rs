@@ -71,3 +71,15 @@ fn coin_selection_prefers_the_tightest_fit() {
     assert_eq!(taken, vec![coin(2, 200_000), coin(3, 120_000)]);
     assert!(Wallet::select_accumulate(&coins, 500_000).is_none());
 }
+
+#[test]
+fn address_params_follow_the_chain_name() {
+    use styx_wallet::wallet::address_params;
+
+    // Compare by the bech32 HRP: the human-facing difference these params carry (pointer
+    // identity of promoted consts is not guaranteed across crates).
+    assert_eq!(address_params("liquidv1").bech_hrp.to_string(), "ex");
+    assert_eq!(address_params("liquidtestnet").bech_hrp.to_string(), "tex");
+    assert_eq!(address_params("styxnet").bech_hrp.to_string(), "ert");
+    assert_eq!(address_params("elementsregtest").bech_hrp.to_string(), "ert");
+}

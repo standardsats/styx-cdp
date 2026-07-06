@@ -37,6 +37,7 @@ pub fn ceremony(
     node: &Node,
     oracle_pks: [XOnlyPublicKey; 5],
     reserve_seed: u64,
+    confirm: &crate::client::Confirm,
 ) -> Result<(Ctx, ProtocolState), CeremonyError> {
     let genesis = node.genesis()?;
     let (_, _, policy) = node.biggest_coin()?;
@@ -90,11 +91,16 @@ pub fn ceremony(
         .ok_or(CeremonyError::Shape("issuance sign hex"))?;
     let tx: Transaction = styx_core::elements::encode::deserialize(&bytes)
         .map_err(|_| CeremonyError::Shape("issuance tx"))?;
-    let txid = node.send_and_mine(&tx)?;
+    let txid = node.send(&tx)?;
 
+    // The issuance must confirm before the reserve seed: the seed's coin selection only
+    // sees confirmed change. On regtest / a private producer we mine the block ourselves;
+    // on a federation chain we wait for one.
     let pot_op = node.find(txid, &ctx.artifacts.pot_spk(), SUPPLY)?;
     let issuer_op = node.find(txid, &ctx.artifacts.issuer_spk(&issuer_state), 1)?;
+    node.confirm_outpoint(pot_op, confirm)?;
     let reserve_op = node.fund_address(policy, &ctx.artifacts.stability_spk(), reserve_seed)?;
+    node.confirm_outpoint(reserve_op, confirm)?;
 
     let protocol = ProtocolState {
         pot: OnChain { state: PotState, outpoint: pot_op, value: Obol::new(SUPPLY) },

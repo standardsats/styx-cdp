@@ -18,6 +18,9 @@ pub struct KeeperConfig {
     /// REFRESH healthy vaults whose ratchet lags by more than this many blocks (M-2).
     #[serde(default = "default_refresh_lag")]
     pub refresh_lag: u32,
+    /// How far below the tip the tick assembly walks looking for a quote quorum.
+    #[serde(default = "default_walkback")]
+    pub walkback: u32,
     #[serde(default = "default_poll_ms")]
     pub poll_ms: u64,
 }
@@ -27,6 +30,9 @@ fn default_poke_lag() -> u32 {
 }
 fn default_refresh_lag() -> u32 {
     16
+}
+fn default_walkback() -> u32 {
+    8
 }
 fn default_poll_ms() -> u64 {
     1_000
@@ -43,6 +49,6 @@ impl KeeperConfig {
     }
 
     pub fn opts(&self) -> KeeperOpts {
-        KeeperOpts { poke_lag: self.poke_lag, refresh_lag: self.refresh_lag, ..KeeperOpts::default() }
+        KeeperOpts { poke_lag: self.poke_lag, refresh_lag: self.refresh_lag, walkback: self.walkback }
     }
 }

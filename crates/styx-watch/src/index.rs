@@ -183,8 +183,17 @@ pub struct IndexState {
 impl IndexState {
     /// An empty index at the chain's genesis: nothing deployed yet, scan starts at block 1.
     pub fn genesis(tip: BlockHash) -> Self {
+        Self::at_height(0, tip)
+    }
+
+    /// An empty index sealed at an arbitrary height: the scan starts at `height + 1`. The
+    /// caller asserts nothing protocol-relevant exists at or before `height` - the intended
+    /// use is starting at the deployment anchor from styxnet.toml, where that holds by
+    /// construction (the ceremony's transactions land strictly after the recorded anchor).
+    /// On the real testnet this is the difference between seconds and hours of first sync.
+    pub fn at_height(height: u32, tip: BlockHash) -> Self {
         IndexState {
-            height: 0,
+            height,
             tip,
             pot: None,
             reserve: None,

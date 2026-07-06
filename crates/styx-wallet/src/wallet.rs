@@ -75,6 +75,63 @@ pub enum WalletError {
     AmbiguousVault(usize),
     #[error("no vault")]
     NoVault,
+    /// The node rejected what the prune tier accepted: a builder invariant broke. This is
+    /// a bug, not an operational condition.
+    #[error("ALERT {what}: node rejected a builder transaction: {message}")]
+    Rejected { what: &'static str, message: String },
+    #[error("{what}: still conflicted after {attempts} rebuilds (heavy contention; retry)")]
+    ConflictExhausted { what: &'static str, attempts: u32 },
+}
+
+/// What a vanished target after a conflict means to the caller. A keeper losing a race is
+/// the system working (someone else liquidated first); an owner's op dissolving under
+/// them wants their eyes, not a silent success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LostRace {
+    Benign,
+    Error,
+}
+
+pub const CONFLICT_ATTEMPTS: u32 = 3;
+
+/// The conflict-retry policy, shared by the wallet ops and the keeper and free-standing so
+/// it is testable without a node. A `Conflict` on broadcast is singleton contention
+/// (someone spent the pot / issuer / vault first): resync, rebuild from fresh state, retry
+/// a bounded number of times. `Ok(None)` (under `LostRace::Benign` only) means the work
+/// turned out to be done by someone else - the target vanished or its ratchet advanced
+/// past our tick after a conflict-triggered resync.
+pub fn retry_conflicts<S>(
+    what: &'static str,
+    state: &mut S,
+    resync: impl Fn(&mut S) -> Result<(), WalletError>,
+    mut f: impl FnMut(&mut S) -> Result<Txid, WalletError>,
+    lost_race: LostRace,
+) -> Result<Option<Txid>, WalletError> {
+    for attempt in 0..CONFLICT_ATTEMPTS {
+        match f(state) {
+            Ok(txid) => return Ok(Some(txid)),
+            Err(WalletError::Broadcast(BroadcastError::Conflict(m))) => {
+                eprintln!("{what}: conflict ({m}), resync + rebuild ({attempt})");
+                resync(state)?;
+            }
+            Err(WalletError::Broadcast(BroadcastError::Rejected(message))) => {
+                return Err(WalletError::Rejected { what, message });
+            }
+            // The target vanished (or its ratchet advanced past our tick) while retrying.
+            Err(
+                e @ (WalletError::VaultNotFound(_)
+                | WalletError::VaultNotMine(_)
+                | WalletError::Build(BuildError::RatchetNotAdvanced { .. })),
+            ) if attempt > 0 => {
+                return match lost_race {
+                    LostRace::Benign => Ok(None),
+                    LostRace::Error => Err(e),
+                };
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(WalletError::ConflictExhausted { what, attempts: CONFLICT_ATTEMPTS })
 }
 
 pub struct Wallet {
@@ -84,6 +141,18 @@ pub struct Wallet {
     pub funding: zkp::Keypair,
     pub state: IndexState,
     snapshot_path: PathBuf,
+    addr_params: &'static AddressParams,
+}
+
+/// The address encoding for a chain name. Scripts and spk derivation are
+/// network-independent; only the human-facing encoding differs.
+pub fn address_params(chain: &str) -> &'static AddressParams {
+    match chain {
+        "liquidv1" => &AddressParams::LIQUID,
+        "liquidtestnet" => &AddressParams::LIQUID_TESTNET,
+        // Regtest and custom private chains (styxnet) use the elements defaults.
+        _ => &AddressParams::ELEMENTS,
+    }
 }
 
 impl Wallet {
@@ -105,7 +174,16 @@ impl Wallet {
         let state = if cfg.snapshot.exists() {
             snapshot::load(&cfg.snapshot)?
         } else {
-            IndexState::genesis(genesis)
+            // First sync starts at the deployment anchor, not block 1: nothing
+            // protocol-relevant exists before the ceremony, and the real testnet is
+            // millions of blocks deep.
+            match &net.protocol {
+                Some(p) => {
+                    let start = p.issuer_anchor_genesis;
+                    IndexState::at_height(start, node.block_hash(start)?)
+                }
+                None => IndexState::genesis(genesis),
+            }
         };
         Ok(Wallet {
             ctx,
@@ -114,6 +192,7 @@ impl Wallet {
             funding: cfg.funding()?,
             state,
             snapshot_path: cfg.snapshot.clone(),
+            addr_params: address_params(&net.network.chain),
         })
     }
 
@@ -141,7 +220,7 @@ impl Wallet {
             self.funding.x_only_public_key().0,
             None,
             None,
-            &AddressParams::ELEMENTS,
+            self.addr_params,
         )
     }
 

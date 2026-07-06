@@ -32,7 +32,21 @@ pub fn scan_spk(
 ) -> Result<Vec<(OutPoint, u64)>, ScanError> {
     use styx_core::elements::hex::ToHex;
     let desc = format!("raw({})", spk.as_bytes().to_hex());
-    let res = node.rpc("scantxoutset", &[json!("start"), json!([{ "desc": desc }])])?;
+    // scantxoutset is a node-global mutex: a keeper daemon and a wallet CLI sharing one
+    // node collide routinely. Busy is transient - wait and retry, bounded.
+    let mut res = node.rpc("scantxoutset", &[json!("start"), json!([{ "desc": desc }])]);
+    for _ in 0..40 {
+        match &res {
+            Err(crate::NodeError::Rpc { message, .. })
+                if message.contains("Scan already in progress") =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                res = node.rpc("scantxoutset", &[json!("start"), json!([{ "desc": desc }])]);
+            }
+            _ => break,
+        }
+    }
+    let res = res?;
     let unspents = res["unspents"]
         .as_array()
         .cloned()

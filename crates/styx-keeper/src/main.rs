@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => return Err(e.into()),
         }
     };
-    let mut keeper = Keeper::new(purse, cfg.opts());
+    let mut keeper = Keeper::new(std::sync::Arc::new(std::sync::Mutex::new(purse)), cfg.opts());
 
     let authors: Vec<nostr_sdk::PublicKey> = net
         .oracles
@@ -71,7 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         // Sync BEFORE draining: the book windows incoming quotes against the indexed tip,
         // and a stale tip would refuse fresh quotes as "future" after a block burst.
-        match keeper.purse.sync() {
+        let synced = keeper.wallet().sync().map(|_| ());
+        match synced {
             Ok(_) => {
                 node_down_since = None;
                 keeper.drain(&mut transport).await;

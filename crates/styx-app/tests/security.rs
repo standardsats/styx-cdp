@@ -136,3 +136,25 @@ async fn the_gate_answers_to_the_bound_address_verbatim() {
     let local = app.oneshot(request("localhost:9780", None, Some(&token))).await.unwrap();
     assert_eq!(local.status(), StatusCode::OK);
 }
+
+#[test]
+fn a_keeper_table_typo_is_a_refused_config() {
+    // The flattened purse swallows unknown top-level keys by construction, but the keeper
+    // table can and does refuse them: poke_lg must not silently mean "default poke_lag".
+    let toml = format!(
+        r#"
+styxnet = "/tmp/styxnet.toml"
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "styx"
+snapshot = "/tmp/snapshot.json"
+owner_seckey = "{k}"
+funding_seckey = "{k}"
+
+[keeper]
+poke_lg = 2
+"#,
+        k = "11".repeat(32),
+    );
+    assert!(matches!(AppConfig::parse(&toml), Err(ConfigError::Toml(_))));
+}

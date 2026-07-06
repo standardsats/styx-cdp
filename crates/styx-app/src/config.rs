@@ -28,10 +28,53 @@ pub struct AppConfig {
     /// The HTTP listener; must resolve to a loopback address.
     #[serde(default = "default_listen")]
     pub listen: String,
+    /// Keeper-mode knobs (the daemon's defaults when absent).
+    #[serde(default)]
+    pub keeper: KeeperSection,
+    /// How often the binary re-assembles a tick from the relays, and the keeper loop's
+    /// pace when running.
+    #[serde(default = "default_poll_ms")]
+    pub poll_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeeperSection {
+    #[serde(default = "default_poke_lag")]
+    pub poke_lag: u32,
+    #[serde(default = "default_refresh_lag")]
+    pub refresh_lag: u32,
+}
+
+impl Default for KeeperSection {
+    fn default() -> Self {
+        KeeperSection { poke_lag: default_poke_lag(), refresh_lag: default_refresh_lag() }
+    }
+}
+
+impl KeeperSection {
+    pub fn opts(&self) -> styx_keeper::keeper::KeeperOpts {
+        styx_keeper::keeper::KeeperOpts {
+            poke_lag: self.poke_lag,
+            refresh_lag: self.refresh_lag,
+            // The app's keeper consumes the shared injected tick; the book walkback is the
+            // daemon's concern and stays at its default.
+            ..Default::default()
+        }
+    }
 }
 
 fn default_listen() -> String {
     "127.0.0.1:9780".into()
+}
+fn default_poll_ms() -> u64 {
+    2_000
+}
+fn default_poke_lag() -> u32 {
+    4
+}
+fn default_refresh_lag() -> u32 {
+    16
 }
 
 impl AppConfig {

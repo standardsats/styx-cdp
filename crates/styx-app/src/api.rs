@@ -2,38 +2,77 @@
 //! blocking wallet machinery on the blocking pool; the session lives behind a mutex (one
 //! wallet, one writer at a time - ops serialize through the singletons anyway).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use styx_core::elements::OutPoint;
+use styx_core::oracle::OracleTick;
+use styx_core::units::{Obol, Sats};
+use styx_keeper::keeper::{Keeper, KeeperError, KeeperOpts};
+use styx_wallet::ops::OpReport;
 use styx_wallet::wallet::{Wallet, WalletError};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
 use crate::auth::{gate, Gate};
 
+/// An injected tick older than this is treated as absent. Generous against every chain
+/// this runs on (styxnet blocks are seconds, the testnet about a minute; the relay loop
+/// refreshes every couple of seconds while the relays are alive).
+pub const TICK_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(180);
+
 /// One line on the event stream: what happened, machine-readable enough for the UI.
+/// Kinds: tick / status / open|repay|draw|refresh|close|redeem (successes) / rejected
+/// (typed refusals - the UI's sticky surfaces) / op_error (infrastructure) / keeper /
+/// performed / keeper_error.
 #[derive(Debug, Clone, Serialize)]
 pub struct AppEvent {
     pub kind: &'static str,
     pub detail: String,
 }
 
+/// Keeper mode as an API state: the exit-65 semantics of the daemon become a sticky
+/// alert here - the loop stops, the process lives, the UI shows the banner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeeperMode {
+    Idle,
+    Running,
+    Alert(String),
+}
+
+struct KeeperCtl {
+    mode: KeeperMode,
+    stop: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
+
 pub struct AppState {
     pub wallet: Arc<Mutex<Wallet>>,
     pub events: tokio::sync::broadcast::Sender<AppEvent>,
+    /// The freshest assembled oracle tick and when it landed. Injected here at the lib
+    /// boundary: the binary's relay loop keeps it current, tests set it directly - the API
+    /// layer stays transport-free.
+    tick: RwLock<Option<(OracleTick, std::time::Instant)>>,
+    keeper_ctl: Mutex<KeeperCtl>,
+    keeper_opts: KeeperOpts,
+    /// The keeper loop's pace between steps.
+    poll: std::time::Duration,
 }
 
 impl AppState {
-    pub fn new(wallet: Wallet) -> Arc<AppState> {
+    pub fn new(wallet: Wallet, keeper_opts: KeeperOpts, poll: std::time::Duration) -> Arc<AppState> {
         Arc::new(AppState {
             wallet: Arc::new(Mutex::new(wallet)),
             events: tokio::sync::broadcast::channel(256).0,
+            tick: RwLock::new(None),
+            keeper_ctl: Mutex::new(KeeperCtl { mode: KeeperMode::Idle, stop: None }),
+            keeper_opts,
+            poll,
         })
     }
 
@@ -41,6 +80,111 @@ impl AppState {
         // Send fails only with no subscribers; events are advisory either way.
         let _ = self.events.send(AppEvent { kind, detail: detail.into() });
     }
+
+    pub fn set_tick(&self, tick: OracleTick) {
+        *self.tick.write().unwrap_or_else(|e| e.into_inner()) = Some((tick, std::time::Instant::now()));
+    }
+
+    /// The injected tick, unless it went stale: quiet relays must surface as "no quorum"
+    /// (one clear 409, the keeper idling) rather than ops signing against a frozen price.
+    /// The chain's own recency gates would refuse eventually - this fails earlier and
+    /// with better words.
+    pub fn tick(&self) -> Option<OracleTick> {
+        self.tick
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() <= TICK_MAX_AGE)
+            .map(|(t, _)| t.clone())
+    }
+
+    fn current_tick(&self) -> Result<OracleTick, ApiError> {
+        self.tick().ok_or(ApiError::NoQuorum)
+    }
+
+    /// Ask a running keeper loop to stop (idempotent; also the shutdown path - a
+    /// spawn_blocking loop that never exits would hang the runtime's drop forever).
+    pub fn request_keeper_stop(&self) -> &'static str {
+        let mut ctl = self.keeper_ctl.lock().unwrap_or_else(|e| e.into_inner());
+        match (&ctl.mode, &ctl.stop) {
+            (KeeperMode::Running, Some(stop)) => {
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                "stopping"
+            }
+            // Acknowledging an alert returns the keeper to idle; a fresh start clears it.
+            (KeeperMode::Alert(_), _) => {
+                ctl.mode = KeeperMode::Idle;
+                "idle"
+            }
+            _ => "idle",
+        }
+    }
+
+    pub fn keeper_mode(&self) -> KeeperMode {
+        self.keeper_ctl.lock().unwrap_or_else(|e| e.into_inner()).mode.clone()
+    }
+
+    fn keeper_status(&self) -> String {
+        match self.keeper_mode() {
+            KeeperMode::Idle => "idle".into(),
+            KeeperMode::Running => "running".into(),
+            KeeperMode::Alert(m) => format!("alert: {m}"),
+        }
+    }
+}
+
+/// Start the keeper loop on the shared purse. The loop consumes the same injected tick as
+/// the op endpoints and runs one `step` per poll; `Rejected` parks it in the sticky Alert
+/// state (the loop stops, the API keeps answering), every other error is logged to the
+/// event stream and the loop continues - the daemon's posture, process death excluded.
+pub fn start_keeper(s: &Arc<AppState>) -> Result<(), ApiError> {
+    let stop = {
+        let mut ctl = s.keeper_ctl.lock().unwrap_or_else(|e| e.into_inner());
+        if ctl.mode == KeeperMode::Running {
+            return Err(ApiError::BadRequest("the keeper is already running".into()));
+        }
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        ctl.mode = KeeperMode::Running;
+        ctl.stop = Some(stop.clone());
+        stop
+    };
+    let state = s.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut keeper = Keeper::new(state.wallet.clone(), state.keeper_opts);
+        state.emit("keeper", "started");
+        while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Some(tick) = state.tick() {
+                match keeper.step(&tick) {
+                    Ok(Some(done)) => state.emit("performed", format!("{done:?}")),
+                    Ok(None) => {}
+                    Err(e @ KeeperError::Rejected { .. }) => {
+                        let msg = e.to_string();
+                        state.emit("rejected", msg.clone());
+                        let mut ctl = state.keeper_ctl.lock().unwrap_or_else(|e| e.into_inner());
+                        ctl.mode = KeeperMode::Alert(msg);
+                        ctl.stop = None;
+                        return;
+                    }
+                    Err(e) => state.emit("keeper_error", e.to_string()),
+                }
+            }
+            std::thread::sleep(state.poll);
+        }
+        let mut ctl = state.keeper_ctl.lock().unwrap_or_else(|e| e.into_inner());
+        ctl.mode = KeeperMode::Idle;
+        ctl.stop = None;
+        state.emit("keeper", "stopped");
+    });
+    Ok(())
+}
+
+async fn keeper_start(State(s): State<Arc<AppState>>) -> Result<&'static str, ApiError> {
+    start_keeper(&s)?;
+    Ok("running")
+}
+
+async fn keeper_stop(State(s): State<Arc<AppState>>) -> &'static str {
+    s.request_keeper_stop()
 }
 
 /// The API error shape: the typed wallet REFUSALS become 409s with their Display text (the
@@ -49,6 +193,10 @@ impl AppState {
 /// variant defaulting to "internal", never to "your request was wrong".
 pub enum ApiError {
     Wallet(WalletError),
+    /// No oracle quorum assembled yet: a refusal, not a failure - retry once quotes flow.
+    NoQuorum,
+    /// A malformed request field (an unparseable outpoint, contradictory sizing).
+    BadRequest(String),
     Internal(String),
 }
 
@@ -81,6 +229,10 @@ impl IntoResponse for ApiError {
                 (StatusCode::CONFLICT, e.to_string()).into_response()
             }
             ApiError::Wallet(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            ApiError::NoQuorum => {
+                (StatusCode::CONFLICT, "no oracle quorum assembled yet".to_string()).into_response()
+            }
+            ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m).into_response(),
             ApiError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m).into_response(),
         }
     }
@@ -95,20 +247,30 @@ pub struct VaultView {
 }
 
 #[derive(Serialize)]
+pub struct Protocol {
+    pub pot_units: u64,
+    pub reserve_sats: u64,
+    pub issuer_anchor: u32,
+}
+
+#[derive(Serialize)]
 pub struct Status {
     pub height: u32,
     pub funding_address: String,
     pub lbtc_sats: u64,
     pub obol_units: u64,
     pub vaults: Vec<VaultView>,
-    /// Keeper mode: "idle" until the duty loop lands in this API.
-    pub keeper: &'static str,
+    /// The protocol singletons; absent until the deployment is visible on this chain.
+    pub protocol: Option<Protocol>,
+    /// Keeper mode: "idle" | "running" | "alert: <message>".
+    pub keeper: String,
 }
 
 /// Sync to the tip and summarize the session. The one blocking round-trip every UI screen
 /// starts from.
 async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError> {
     let wallet = s.wallet.clone();
+    let keeper = s.keeper_status();
     let status = tokio::task::spawn_blocking(move || -> Result<Status, WalletError> {
         // Poison recovery is sound HERE: sync() rebuilds the wallet view from the node, so
         // a panic in a previous holder leaves nothing this read path depends on. The op
@@ -126,13 +288,19 @@ async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError
                 last_height: v.state.last_height.raw(),
             })
             .collect();
+        let protocol = w.protocol().ok().map(|p| Protocol {
+            pot_units: p.pot.value.raw(),
+            reserve_sats: p.reserve.value.raw(),
+            issuer_anchor: p.issuer.state.last_mint_height.raw(),
+        });
         Ok(Status {
             height: w.state.height,
             funding_address: w.funding_address().to_string(),
             lbtc_sats: w.lbtc_coins()?.iter().map(|(_, v)| *v).sum(),
             obol_units: w.obol_coins()?.iter().map(|(_, v)| *v).sum(),
             vaults,
-            keeper: "idle",
+            protocol,
+            keeper,
         })
     })
     .await
@@ -154,11 +322,176 @@ async fn events(State(s): State<Arc<AppState>>) -> impl IntoResponse {
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+// --- the owner ops -----------------------------------------------------------------
+
+/// `txid:vout`, the same shape the CLI prints and takes.
+fn outpoint(s: &str) -> Result<OutPoint, ApiError> {
+    let bad = || ApiError::BadRequest(format!("vault: expected txid:vout, got {s}"));
+    let (txid, vout) = s.split_once(':').ok_or_else(bad)?;
+    Ok(OutPoint::new(txid.parse().map_err(|_| bad())?, vout.parse().map_err(|_| bad())?))
+}
+
+fn vault_arg(v: &Option<String>) -> Result<Option<OutPoint>, ApiError> {
+    v.as_deref().map(outpoint).transpose()
+}
+
+/// What a broadcast op answers with: the txid and the successor vault, when one survives.
+#[derive(Serialize)]
+pub struct OpView {
+    pub txid: String,
+    pub vault: Option<VaultView>,
+}
+
+fn op_view(report: OpReport) -> OpView {
+    OpView {
+        txid: report.txid.to_string(),
+        vault: report.vault.map(|v| VaultView {
+            outpoint: v.outpoint.to_string(),
+            debt_units: v.state.debt.raw(),
+            collateral_sats: v.value.raw(),
+            last_height: v.state.last_height.raw(),
+        }),
+    }
+}
+
+/// Run one blocking wallet call on the blocking pool. Poison recovery matches `status`:
+/// every op begins with a sync that rebuilds the view, and the ops themselves hand state
+/// changes to the chain - nothing in-memory survives a panic that the next sync would trust.
+async fn run_op<F>(s: &Arc<AppState>, kind: &'static str, f: F) -> Result<Json<OpView>, ApiError>
+where
+    F: FnOnce(&mut Wallet) -> Result<OpReport, WalletError> + Send + 'static,
+{
+    let wallet = s.wallet.clone();
+    let report = tokio::task::spawn_blocking(move || {
+        let mut w = wallet.lock().unwrap_or_else(|e| e.into_inner());
+        w.sync()?; // every op acts on a tip-fresh view, the CLI convention
+        f(&mut w)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("{kind} task: {e}")))?
+    .map_err(|e| {
+        // Failures reach the SSE stream too, split the way the status codes split: a typed
+        // refusal is the UI's sticky surface, an infrastructure error is not "you were
+        // wrong".
+        let event = if is_refusal(&e) { "rejected" } else { "op_error" };
+        s.emit(event, format!("{kind}: {e}"));
+        ApiError::from(e)
+    })?;
+    let view = op_view(report);
+    s.emit(kind, view.txid.clone());
+    Ok(Json(view))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenReq {
+    pub principal: u64,
+    /// Explicit collateral in sats; alternatively `cr_percent` sizes it from the tick.
+    pub collateral: Option<u64>,
+    pub cr_percent: Option<u32>,
+}
+
+async fn open(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<OpenReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let tick = s.current_tick()?;
+    let principal = Obol::new(req.principal);
+    let collateral = match (req.collateral, req.cr_percent) {
+        (Some(sats), None) => Sats::new(sats),
+        (None, cr) => Wallet::collateral_for(principal, &tick, cr).map_err(ApiError::Wallet)?,
+        (Some(_), Some(_)) => {
+            return Err(ApiError::BadRequest("collateral and cr_percent are exclusive".into()))
+        }
+    };
+    run_op(&s, "open", move |w| w.open(principal, collateral, &tick)).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmountReq {
+    pub vault: Option<String>,
+    pub amount: u64,
+}
+
+async fn repay(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<AmountReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let which = vault_arg(&req.vault)?;
+    run_op(&s, "repay", move |w| w.repay(which, Obol::new(req.amount))).await
+}
+
+async fn draw(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<AmountReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let tick = s.current_tick()?;
+    let which = vault_arg(&req.vault)?;
+    run_op(&s, "draw", move |w| w.draw(which, Obol::new(req.amount), &tick)).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VaultReq {
+    pub vault: Option<String>,
+}
+
+async fn refresh(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<VaultReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let tick = s.current_tick()?;
+    let which = vault_arg(&req.vault)?;
+    run_op(&s, "refresh", move |w| w.refresh(which, &tick)).await
+}
+
+async fn close(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<VaultReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let which = vault_arg(&req.vault)?;
+    run_op(&s, "close", move |w| w.close(which)).await
+}
+
+async fn redeem(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<AmountReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let tick = s.current_tick()?;
+    let which = vault_arg(&req.vault)?;
+    run_op(&s, "redeem", move |w| w.redeem(which, Obol::new(req.amount), &tick)).await
+}
+
 /// The full application router: every route behind the gate.
 pub fn router(state: Arc<AppState>, g: Arc<Gate>) -> Router {
     Router::new()
         .route("/api/status", get(status))
         .route("/api/events", get(events))
+        .route("/api/open", post(open))
+        .route("/api/repay", post(repay))
+        .route("/api/draw", post(draw))
+        .route("/api/refresh", post(refresh))
+        .route("/api/close", post(close))
+        .route("/api/redeem", post(redeem))
+        .route("/api/keeper/start", post(keeper_start))
+        .route("/api/keeper/stop", post(keeper_stop))
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(g, gate))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_request_fields_are_refused() {
+        // A typo ("colateral") must be a deserialization error, never a silent default:
+        // this is a money API.
+        assert!(serde_json::from_str::<OpenReq>(r#"{"principal":1,"colateral":2}"#).is_err());
+        assert!(serde_json::from_str::<AmountReq>(r#"{"amount":1,"valut":"x:0"}"#).is_err());
+        assert!(serde_json::from_str::<VaultReq>(r#"{"vualt":"x:0"}"#).is_err());
+        assert!(serde_json::from_str::<OpenReq>(r#"{"principal":1,"collateral":2}"#).is_ok());
+    }
 }

@@ -67,32 +67,25 @@ impl Wallet {
         principal: Obol,
         collateral: Sats,
         tick: &OracleTick,
+        shaped: &mut Option<OutPoint>,
     ) -> Result<OpReport, WalletError> {
         let protocol = self.protocol()?;
-        let (lo, _) = tick.price_range();
-        let debt_cents = principal.covenant_cents()?;
-        let need =
-            collateral.checked_add(coll_at_cr(debt_cents, lo, K_FEE_HALF_PERCENT))?.checked_add(FEE)?;
+        let need = self.open_need(principal, collateral, tick)?;
         let coins = self.lbtc_coins()?;
-        let funding = match coins.iter().find(|(_, v)| *v == need.raw()) {
-            Some((op, v)) => self.funding_coin(*op, *v),
-            None => {
-                let (exact, _) = self.shape_exact(need)?;
-                self.funding_coin(exact, need.raw())
-            }
+        let funding = if let Some((op, v)) = coins.iter().find(|(_, v)| *v == need.raw()) {
+            self.funding_coin(*op, *v)
+        } else if let Some(op) = *shaped {
+            // Our shaping tx from a previous attempt, unconfirmed but ours: chain on it.
+            self.funding_coin(op, need.raw())
+        } else {
+            let (exact, _) = self.shape_exact(need)?;
+            *shaped = Some(exact);
+            self.funding_coin(exact, need.raw())
         };
         let built = build::open::open(
             &self.ctx,
             &protocol,
-            &OpenIntent {
-                owner: self.owner_pk(),
-                principal,
-                collateral,
-                borrower_spk: self.funding_spk(),
-                funding,
-                tick: tick.clone(),
-                fee: FEE,
-            },
+            &self.open_intent(principal, collateral, tick, funding),
         )?;
         let txid = self.sign_and_broadcast(&built.plan)?;
         Ok(OpReport { txid, vault: Some(built.expected.vault) })
@@ -321,7 +314,64 @@ impl Wallet {
         collateral: Sats,
         tick: &OracleTick,
     ) -> Result<OpReport, WalletError> {
-        self.with_retry("open", |w| w.open_once(principal, collateral, tick))
+        // A refused open must leave no trace on chain: the intent is validated against a
+        // probe funding coin BEFORE any shaping broadcast.
+        self.validate_open(principal, collateral, tick)?;
+        // At most one shaping tx per op, remembered across conflict retries: re-shaping
+        // while the first shape sits unconfirmed is an equal-fee replacement the mempool
+        // refuses forever. If the shape itself loses its inputs to a race, the retries end
+        // in ConflictExhausted - the accepted outcome, the caller retries the op whole.
+        let mut shaped: Option<OutPoint> = None;
+        self.with_retry("open", |w| w.open_once(principal, collateral, tick, &mut shaped))
+    }
+
+    /// Build the open against a probe coin of exactly the needed value: every builder
+    /// refusal (undercollateralization, an empty pot, a stale tick) surfaces here, with
+    /// nothing broadcast and nothing shaped.
+    fn validate_open(
+        &mut self,
+        principal: Obol,
+        collateral: Sats,
+        tick: &OracleTick,
+    ) -> Result<(), WalletError> {
+        let protocol = self.protocol()?;
+        let need = self.open_need(principal, collateral, tick)?;
+        let probe = FundingCoin { outpoint: OutPoint::default(), value: need, spk: self.funding_spk() };
+        build::open::open(&self.ctx, &protocol, &self.open_intent(principal, collateral, tick, probe))?;
+        Ok(())
+    }
+
+    /// One OpenIntent constructor for the probe and the real build: if the intent grows a
+    /// field, the validation cannot drift from what gets broadcast.
+    fn open_intent(
+        &self,
+        principal: Obol,
+        collateral: Sats,
+        tick: &OracleTick,
+        funding: FundingCoin,
+    ) -> OpenIntent {
+        OpenIntent {
+            owner: self.owner_pk(),
+            principal,
+            collateral,
+            borrower_spk: self.funding_spk(),
+            funding,
+            tick: tick.clone(),
+            fee: FEE,
+        }
+    }
+
+    /// The exact funding an open needs: collateral + the 0.5% borrow fee at the min quote
+    /// + the tx fee (the frozen layout has no change output).
+    fn open_need(
+        &self,
+        principal: Obol,
+        collateral: Sats,
+        tick: &OracleTick,
+    ) -> Result<Sats, WalletError> {
+        let (lo, _) = tick.price_range();
+        let debt_cents = principal.covenant_cents()?;
+        Ok(collateral.checked_add(coll_at_cr(debt_cents, lo, K_FEE_HALF_PERCENT))?.checked_add(FEE)?)
     }
 
     pub fn repay(&mut self, which: Option<OutPoint>, amount: Obol) -> Result<OpReport, WalletError> {

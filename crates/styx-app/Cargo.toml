@@ -10,6 +10,8 @@ styx-core = { path = "../styx-core" }
 styx-node = { path = "../styx-node" }
 styx-wallet = { path = "../styx-wallet" }
 styx-watch = { path = "../styx-watch" }
+styx-keeper = { path = "../styx-keeper" }
+nostr-sdk = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
@@ -22,3 +24,4 @@ clap = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }
+reqwest = { workspace = true }

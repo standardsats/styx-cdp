@@ -98,7 +98,10 @@ pub const REJECTED_EXIT: i32 = 65;
 const ACTED_RETRY_BLOCKS: u32 = 6;
 
 pub struct Keeper {
-    pub purse: Wallet,
+    /// The purse, shared: the daemon owns the only handle, styx-app hands the keeper the
+    /// same session its op endpoints use (one set of coins, one writer at a time). Methods
+    /// lock per call and never hold the guard across another lock.
+    pub purse: std::sync::Arc<std::sync::Mutex<Wallet>>,
     pub book: QuoteBook,
     pub opts: KeeperOpts,
     /// Broadcast-but-unconfirmed actions: spent vault outpoint -> the height acted at.
@@ -119,11 +122,14 @@ pub struct Keeper {
 }
 
 impl Keeper {
-    pub fn new(purse: Wallet, opts: KeeperOpts) -> Self {
-        let book = QuoteBook::new(purse.ctx.params.oracle_pks);
+    pub fn new(purse: std::sync::Arc<std::sync::Mutex<Wallet>>, opts: KeeperOpts) -> Self {
+        let oracle_pks = {
+            let w = purse.lock().unwrap_or_else(|e| e.into_inner());
+            w.ctx.params.oracle_pks
+        };
         Keeper {
             purse,
-            book,
+            book: QuoteBook::new(oracle_pks),
             opts,
             acted: std::collections::BTreeMap::new(),
             poked: None,
@@ -131,9 +137,15 @@ impl Keeper {
         }
     }
 
+    /// The locked purse. Poison recovery matches the wallet's own convention: every step
+    /// begins with a sync that rebuilds the view from the node.
+    pub fn wallet(&self) -> std::sync::MutexGuard<'_, Wallet> {
+        self.purse.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Feed one incoming quote into the book (verification inside; rejects are dropped).
     pub fn absorb(&mut self, quote: &WireQuote) {
-        let tip = BlockHeight::new(self.purse.state.height);
+        let tip = BlockHeight::new(self.wallet().state.height);
         if let Err(e) = self.book.insert(quote, tip) {
             eprintln!("dropping a quote: {e}");
         }
@@ -148,7 +160,7 @@ impl Keeper {
 
     /// The freshest assemblable tick at or near the indexed tip.
     pub fn assemble(&self) -> Option<OracleTick> {
-        let tip = self.purse.state.height;
+        let tip = self.wallet().state.height;
         (tip.saturating_sub(self.opts.walkback)..=tip)
             .rev()
             .find_map(|h| self.book.assemble_tick(BlockHeight::new(h)))
@@ -158,18 +170,23 @@ impl Keeper {
     /// urgent action (see the module doc for why one). Vaults with a pending broadcast
     /// (`acted`) sit out until their spend confirms or goes stale.
     pub fn step(&mut self, tick: &OracleTick) -> Result<Option<Performed>, KeeperError> {
-        self.purse.sync()?;
-        let height = self.purse.state.height;
+        // One guard for the pre-work, dropped before execute (whose retry loop locks per
+        // attempt): the indexed facts are copied out, not borrowed.
+        let (height, anchor, indexed) = {
+            let mut w = self.wallet();
+            w.sync()?;
+            let anchor = w.protocol()?.issuer.state.last_mint_height;
+            let indexed: std::collections::BTreeSet<OutPoint> = w.state.vaults.keys().copied().collect();
+            (w.state.height, anchor, indexed)
+        };
         // One action per block: if we already acted at this height, wait for it to land.
         if self.last_acted_height == Some(height) {
             return Ok(None);
         }
         // An acted-on outpoint that left the index confirmed; one that lingered past the
         // retry window is fair game again (the broadcast evidently went nowhere).
-        let vaults_now = &self.purse.state.vaults;
-        self.acted.retain(|op, at| {
-            vaults_now.contains_key(op) && height < at.saturating_add(ACTED_RETRY_BLOCKS)
-        });
+        self.acted
+            .retain(|op, at| indexed.contains(op) && height < at.saturating_add(ACTED_RETRY_BLOCKS));
 
         // Liquidations, most severe first. Vaults with unresolved owners cannot be built
         // against (their owner bytes never surfaced); the indexer keeps them opaque.
@@ -179,7 +196,6 @@ impl Keeper {
             Action::Partial { .. } => 1,
             _ => 0,
         };
-        let anchor = self.purse.protocol()?.issuer.state.last_mint_height;
         let mut vaults = self.known_vaults();
         vaults.retain(|v| !self.acted.contains_key(&v.outpoint));
         vaults.sort_by_key(|v| v.outpoint); // deterministic order
@@ -236,7 +252,7 @@ impl Keeper {
     }
 
     fn known_vaults(&self) -> Vec<OnChain<VaultState>> {
-        self.purse.state.vaults.iter().filter_map(|(op, v)| v.known(*op)).collect()
+        self.wallet().state.vaults.iter().filter_map(|(op, v)| v.known(*op)).collect()
     }
 
     /// Execute one decided action against a vault, with the conflict-retry loop. The vault
@@ -251,104 +267,96 @@ impl Keeper {
         let txid = match action {
             Action::Partial { .. } => self.with_retry("partial liquidate", |k| {
                 let v = k.vault_at(vault)?;
-                let protocol = k.purse.protocol()?;
+                let w = &*k.wallet();
+                let protocol = w.protocol()?;
                 // Re-plan against the re-read vault: a conflict may have changed it.
                 let anchor = protocol.issuer.state.last_mint_height;
                 let Action::Partial { dd, residual } = decide(&v, tick, anchor, k.opts.refresh_lag, FEE)
                 else {
                     return Err(WalletError::VaultNotFound(vault)); // no longer partial: resolved
                 };
-                let (op, val) = k.purse.ensure_obol(dd.raw())?;
+                let (op, val) = w.ensure_obol(dd.raw())?;
                 let built = build::liquidate::liquidate(
-                    &k.purse.ctx,
+                    &w.ctx,
                     &protocol,
                     &v,
                     &LiquidateIntent {
                         dd,
                         residual,
-                        keeper: ObolCoin {
-                            outpoint: op,
-                            value: Obol::new(val),
-                            spk: k.purse.funding_spk(),
-                        },
-                        keeper_spk: k.purse.funding_spk(),
-                        obol_change_spk: k.purse.funding_spk(),
+                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
+                        keeper_spk: w.funding_spk(),
+                        obol_change_spk: w.funding_spk(),
                         tick: tick.clone(),
                         fee: FEE,
                     },
                 )?;
-                k.purse.sign_and_broadcast(&built.plan)
+                w.sign_and_broadcast(&built.plan)
             })?,
             Action::FullLiq => self.with_retry("full liquidate", |k| {
                 let v = k.vault_at(vault)?;
-                let protocol = k.purse.protocol()?;
+                let w = &*k.wallet();
+                let protocol = w.protocol()?;
                 // Strictly more than the debt: the positive OBOL change is the E-5 anchor.
-                let (op, val) = k.purse.ensure_obol(v.state.debt.raw() + 1)?;
+                let (op, val) = w.ensure_obol(v.state.debt.raw() + 1)?;
                 let built = build::full_liq::full_liq(
-                    &k.purse.ctx,
+                    &w.ctx,
                     &protocol,
                     &v,
                     &FullLiqIntent {
-                        keeper: ObolCoin {
-                            outpoint: op,
-                            value: Obol::new(val),
-                            spk: k.purse.funding_spk(),
-                        },
-                        keeper_spk: k.purse.funding_spk(),
-                        obol_change_spk: k.purse.funding_spk(),
+                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
+                        keeper_spk: w.funding_spk(),
+                        obol_change_spk: w.funding_spk(),
                         tick: tick.clone(),
                         fee: FEE,
                     },
                 )?;
-                k.purse.sign_and_broadcast(&built.plan)
+                w.sign_and_broadcast(&built.plan)
             })?,
             Action::BadDebt => self.with_retry("bad debt", |k| {
                 let v = k.vault_at(vault)?;
-                let protocol = k.purse.protocol()?;
-                let (op, val) = k.purse.ensure_obol(v.state.debt.raw())?;
-                let (fee_op, fee_val) = k.purse.pick_lbtc(FEE.raw() + 1)?;
+                let w = &*k.wallet();
+                let protocol = w.protocol()?;
+                let (op, val) = w.ensure_obol(v.state.debt.raw())?;
+                let (fee_op, fee_val) = w.pick_lbtc(FEE.raw() + 1)?;
                 let built = build::bad_debt::bad_debt(
-                    &k.purse.ctx,
+                    &w.ctx,
                     &protocol,
                     &v,
                     &BadDebtIntent {
-                        keeper: ObolCoin {
-                            outpoint: op,
-                            value: Obol::new(val),
-                            spk: k.purse.funding_spk(),
-                        },
-                        keeper_spk: k.purse.funding_spk(),
-                        obol_change_spk: k.purse.funding_spk(),
+                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
+                        keeper_spk: w.funding_spk(),
+                        obol_change_spk: w.funding_spk(),
                         fee_coin: FundingCoin {
                             outpoint: fee_op,
                             value: Sats::new(fee_val),
-                            spk: k.purse.funding_spk(),
+                            spk: w.funding_spk(),
                         },
-                        change_spk: k.purse.funding_spk(),
+                        change_spk: w.funding_spk(),
                         tick: tick.clone(),
                         fee: FEE,
                     },
                 )?;
-                k.purse.sign_and_broadcast(&built.plan)
+                w.sign_and_broadcast(&built.plan)
             })?,
             Action::Refresh => self.with_retry("refresh", |k| {
                 let v = k.vault_at(vault)?;
-                let (fee_op, fee_val) = k.purse.pick_lbtc(FEE.raw() + 1)?;
+                let w = &*k.wallet();
+                let (fee_op, fee_val) = w.pick_lbtc(FEE.raw() + 1)?;
                 let built = build::refresh::refresh(
-                    &k.purse.ctx,
+                    &w.ctx,
                     &v,
                     &RefreshIntent {
                         tick: tick.clone(),
                         fee_coin: FundingCoin {
                             outpoint: fee_op,
                             value: Sats::new(fee_val),
-                            spk: k.purse.funding_spk(),
+                            spk: w.funding_spk(),
                         },
-                        change_spk: k.purse.funding_spk(),
+                        change_spk: w.funding_spk(),
                         fee: FEE,
                     },
                 )?;
-                k.purse.sign_and_broadcast(&built.plan)
+                w.sign_and_broadcast(&built.plan)
             })?,
             Action::None => return Ok(None),
         };
@@ -363,27 +371,29 @@ impl Keeper {
     }
 
     fn vault_at(&self, op: OutPoint) -> Result<OnChain<VaultState>, WalletError> {
-        self.purse.state.vaults.get(&op).and_then(|v| v.known(op)).ok_or(WalletError::VaultNotFound(op))
+        self.wallet()
+            .state
+            .vaults
+            .get(&op)
+            .and_then(|v| v.known(op))
+            .ok_or(WalletError::VaultNotFound(op))
     }
 
     fn build_poke(&mut self, tick: &OracleTick) -> Result<Txid, WalletError> {
-        let protocol = self.purse.protocol()?;
-        let (op, val) = self.purse.pick_lbtc(FEE.raw() + 1)?;
+        let w = &*self.wallet();
+        let protocol = w.protocol()?;
+        let (op, val) = w.pick_lbtc(FEE.raw() + 1)?;
         let built = build::poke::poke(
-            &self.purse.ctx,
+            &w.ctx,
             &protocol.issuer,
             &PokeIntent {
                 tick: tick.clone(),
-                funding: FundingCoin {
-                    outpoint: op,
-                    value: Sats::new(val),
-                    spk: self.purse.funding_spk(),
-                },
-                change_spk: self.purse.funding_spk(),
+                funding: FundingCoin { outpoint: op, value: Sats::new(val), spk: w.funding_spk() },
+                change_spk: w.funding_spk(),
                 fee: FEE,
             },
         )?;
-        self.purse.sign_and_broadcast(&built.plan)
+        w.sign_and_broadcast(&built.plan)
     }
 
     /// The shared conflict-retry (styx-wallet's), with the keeper's lost-race policy:
@@ -394,14 +404,14 @@ impl Keeper {
         what: &'static str,
         f: impl FnMut(&mut Self) -> Result<Txid, WalletError>,
     ) -> Result<Option<Txid>, KeeperError> {
-        retry_conflicts(what, self, |k| k.purse.sync().map(|_| ()), f, LostRace::Benign).map_err(|e| {
-            match e {
+        retry_conflicts(what, self, |k| k.wallet().sync().map(|_| ()), f, LostRace::Benign).map_err(
+            |e| match e {
                 WalletError::Rejected { what, message } => KeeperError::Rejected { what, message },
                 WalletError::ConflictExhausted { what, attempts } => {
                     KeeperError::ConflictExhausted { what, attempts }
                 }
                 e => KeeperError::Wallet(e),
-            }
-        })
+            },
+        )
     }
 }

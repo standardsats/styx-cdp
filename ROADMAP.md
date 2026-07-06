@@ -223,18 +223,23 @@ the UI is served by the user's own binary from 127.0.0.1 (the Specter / RTL patt
 community trusts), never from a remote origin; the only hosted surface is a read-only
 explorer that cannot sign by construction.
 
-- [ ] **U0 - styx-app: the local API server.** A new bin crate over the existing libs (ops
-  stays runtime-free; ticks assemble at the binary boundary exactly as the CLI does): axum
-  serving a JSON API plus an SSE event stream (sync progress, keeper journal) for one
-  wallet session. The security invariants come first and are the fast tier: 127.0.0.1
-  bind only (a non-loopback listen is a refused config), a per-session token minted at
-  startup and required on every call, an Origin/Host allowlist (the DNS-rebinding /
-  drive-by class every local wallet gets probed with) - each with its negative test.
-  Keeper mode lives in the same API: start/stop the step loop in-process on the same
-  purse, opts from the config, the Performed feed, and Rejected surfacing as a sticky
-  alert that stops the loop - the exit-65 semantics become an API state, not a dead
-  process. Acceptance: the whole owner cycle driven through the HTTP API against a
-  regtest deployment, plus the keeper loop closing one partial liquidation through it.
+- [x] **U0 - styx-app: the local API server.** A bin crate over the existing libs (ops
+  runtime-free; the binary's tick loop assembles from the relays with the CLI's fetch
+  walk-back, tests inject at the lib seam): axum serving the JSON API plus the SSE event
+  stream (fetch-streamed - EventSource cannot carry the token header, and tokens stay out
+  of URLs). The security invariants are the fast tier: loopback-only listen (refused
+  config otherwise), a per-session token (digest-compared) required on every call, an
+  Origin/Host allowlist minted from the bound address - each with the negative test that
+  names its attack. Ops: open (collateral or cr_percent sizing) / repay / draw / refresh /
+  close / redeem; unknown request fields are refused (a typo must never become a silent
+  default on a money API); refusals are 409s in the CLI's words and reach the event stream
+  as `rejected`. The keeper is an API state on the SAME purse (Keeper now takes the shared
+  session; its daemon and smoke unchanged in behavior): start/stop, the Performed feed,
+  Rejected parks a sticky alert and stops the loop - exit-65 as state, not a dead process.
+  Acceptance, both on node: the whole owner cycle through HTTP (including the proof that a
+  refused open leaves the mempool empty - the validate-first invariant this acceptance
+  forced into ops::open), and the keeper loop healing a $50k dip partially through the
+  same API, then draining back to idle on stop.
 - [ ] **U1 - the app UI (wallet + keeper, one binary).** Static assets embedded in the
   binary (the spec-site look: same self-hosted fonts, same theme), served same-origin;
   a test walks the served HTML/JS and asserts no external URL - no CDN, no telemetry,

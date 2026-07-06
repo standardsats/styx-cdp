@@ -95,7 +95,7 @@ async fn keeper_pass(
     keeper: &mut Keeper,
     endpoint: &mut styx_watch::transport::MockTransport,
 ) -> Option<Performed> {
-    keeper.purse.sync().expect("sync");
+    keeper.wallet().sync().expect("sync");
     keeper.drain(endpoint).await;
     let tick = keeper.assemble().expect("quorum assembles");
     keeper.step(&tick).expect("step")
@@ -127,22 +127,25 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
 
         // The keeper's purse: its own keys - the wallet's owner is NOT among its candidates.
         let mut keeper = Keeper::new(
-            Wallet::open_session(&role_config(&dep, &dir, "keeper", 0x2a)).expect("keeper session"),
+            std::sync::Arc::new(std::sync::Mutex::new(
+                Wallet::open_session(&role_config(&dep, &dir, "keeper", 0x2a)).expect("keeper session"),
+            )),
             KeeperOpts { poke_lag: 2, refresh_lag: 3, walkback: 8 },
         );
-        keeper.purse.fund(5_000_000).expect("keeper fee funds");
+        keeper.wallet().fund(5_000_000).expect("keeper fee funds");
         dep.node.mine().unwrap();
 
         // The wallet hands its 4M OBOL principal to the keeper (the market, abridged) -
         // through the CLI-facing send op.
-        wallet.send_obol(keeper.purse.funding_spk(), Obol::new(4_000_000)).expect("obol transfer");
+        wallet.send_obol(keeper.wallet().funding_spk(), Obol::new(4_000_000)).expect("obol transfer");
         dep.node.mine().unwrap();
 
         // The keeper sees the foreign vault with a RESOLVED owner: the witness scan, not a
         // configured candidate (candidate A of the R4 decision).
-        keeper.purse.sync().unwrap();
-        let tracked = keeper.purse.state.vaults.get(&vault_born.outpoint).expect("tracked");
-        assert_eq!(tracked.owner, Some(vault_born.state.owner), "owner out of the witness");
+        keeper.wallet().sync().unwrap();
+        let tracked_owner =
+            keeper.wallet().state.vaults.get(&vault_born.outpoint).expect("tracked").owner;
+        assert_eq!(tracked_owner, Some(vault_born.state.owner), "owner out of the witness");
 
         let hub = MockHub::new();
         let mut endpoint = hub.endpoint();
@@ -177,9 +180,9 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
             panic!("expected a partial liquidation, got {done:?}");
         };
         dep.node.mine().unwrap();
-        keeper.purse.sync().unwrap();
+        keeper.wallet().sync().unwrap();
         let healed = keeper
-            .purse
+            .wallet()
             .state
             .vaults
             .iter()
@@ -190,8 +193,8 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
 
         // The $35k crash puts the healed vault under water: bad-debt closes it, the reserve
         // compensates the keeper.
-        let reserve_before = keeper.purse.protocol().unwrap().reserve.value;
-        let keeper_lbtc_before: u64 = keeper.purse.lbtc_coins().unwrap().iter().map(|(_, v)| v).sum();
+        let reserve_before = keeper.wallet().protocol().unwrap().reserve.value;
+        let keeper_lbtc_before: u64 = keeper.wallet().lbtc_coins().unwrap().iter().map(|(_, v)| v).sum();
         publish_quorum(&dep, &hub, 35_000).await;
         let done = keeper_pass(&mut keeper, &mut endpoint).await;
         assert!(
@@ -199,18 +202,18 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
             "expected a bad-debt closure, got {done:?}"
         );
         dep.node.mine().unwrap();
-        keeper.purse.sync().unwrap();
+        keeper.wallet().sync().unwrap();
 
         // Every debt is burned: no vaults, the pot back at the full supply, the reserve
         // paid out, the keeper collected collateral plus the shortfall cover.
-        assert!(keeper.purse.state.vaults.is_empty());
-        assert!(keeper.purse.state.lost.is_empty());
-        assert_eq!(keeper.purse.protocol().unwrap().pot.value.raw(), SUPPLY);
-        assert!(keeper.purse.protocol().unwrap().reserve.value < reserve_before);
-        let keeper_lbtc: u64 = keeper.purse.lbtc_coins().unwrap().iter().map(|(_, v)| v).sum();
+        assert!(keeper.wallet().state.vaults.is_empty());
+        assert!(keeper.wallet().state.lost.is_empty());
+        assert_eq!(keeper.wallet().protocol().unwrap().pot.value.raw(), SUPPLY);
+        assert!(keeper.wallet().protocol().unwrap().reserve.value < reserve_before);
+        let keeper_lbtc: u64 = keeper.wallet().lbtc_coins().unwrap().iter().map(|(_, v)| v).sum();
         assert!(keeper_lbtc > keeper_lbtc_before, "the keeper was made whole in sats");
         assert_eq!(
-            keeper.purse.obol_coins().unwrap().iter().map(|(_, v)| v).sum::<u64>(),
+            keeper.wallet().obol_coins().unwrap().iter().map(|(_, v)| v).sum::<u64>(),
             0,
             "all keeper OBOL burned into the pot"
         );

@@ -1,0 +1,26 @@
+# StartOS runs the same two flake images as Umbrel: the app plus its own node. StartOS's
+# proxy fronts the app over Tor / LAN TLS, so app.toml carries a [proxy] section (bind
+# 0.0.0.0:9780, allow_hosts the .onion and .local names) - loopback-only would 403 the
+# proxied browser. See PACKAGING.md and deploy/app.toml.example.
+version: "3.7"
+services:
+  elementsd:
+    image: styx-elementsd:REV
+    restart: on-failure
+    volumes:
+      - node-data:/data
+      - ./elements.conf:/data/elements.conf:ro
+
+  app:
+    image: styx-app:REV
+    restart: on-failure
+    depends_on: [elementsd]
+    command: ["--config", "/etc/styx/app.toml"]
+    volumes:
+      - ./app.toml:/etc/styx/app.toml:ro
+      - ./liquid-testnet.toml:/etc/styx/liquid-testnet.toml:ro
+      - app-state:/var/lib/styx
+
+volumes:
+  node-data:
+  app-state:

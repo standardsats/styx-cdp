@@ -8,6 +8,8 @@ description = "STYX v1 transaction builders: pure (state + intent) -> plan, sign
 [dependencies]
 styx-core = { path = "../styx-core" }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

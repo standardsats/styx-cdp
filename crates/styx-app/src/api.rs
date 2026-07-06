@@ -62,7 +62,14 @@ pub struct AppState {
     keeper_opts: KeeperOpts,
     /// The keeper loop's pace between steps.
     poll: std::time::Duration,
+    /// Unsigned plans exported for external owner signing, keyed by txid. Owned by this
+    /// state (not the process), and bounded: at capacity the oldest export is dropped, so
+    /// exports that are never applied cannot grow without limit.
+    pending: Mutex<std::collections::VecDeque<(String, styx_pset::plan::TxPlan)>>,
 }
+
+/// The most unsigned exports held at once; older ones are evicted (re-export to sign them).
+const PENDING_CAP: usize = 32;
 
 impl AppState {
     pub fn new(wallet: Wallet, keeper_opts: KeeperOpts, poll: std::time::Duration) -> Arc<AppState> {
@@ -73,7 +80,26 @@ impl AppState {
             keeper_ctl: Mutex::new(KeeperCtl { mode: KeeperMode::Idle, stop: None }),
             keeper_opts,
             poll,
+            pending: Mutex::new(std::collections::VecDeque::new()),
         })
+    }
+
+    fn stash_pending(&self, txid: String, plan: styx_pset::plan::TxPlan) {
+        let mut q = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        q.retain(|(t, _)| *t != txid);
+        q.push_back((txid, plan));
+        while q.len() > PENDING_CAP {
+            q.pop_front();
+        }
+    }
+
+    fn take_pending(&self, txid: &str) -> Option<styx_pset::plan::TxPlan> {
+        let q = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        q.iter().find(|(t, _)| t == txid).map(|(_, p)| p.clone())
+    }
+
+    fn drop_pending(&self, txid: &str) {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).retain(|(t, _)| t != txid);
     }
 
     pub fn emit(&self, kind: &'static str, detail: impl Into<String>) {
@@ -197,6 +223,8 @@ pub enum ApiError {
     NoQuorum,
     /// A malformed request field (an unparseable outpoint, contradictory sizing).
     BadRequest(String),
+    /// A previously exported plan no longer applies: the chain moved under it.
+    Stale(String),
     Internal(String),
 }
 
@@ -233,6 +261,7 @@ impl IntoResponse for ApiError {
                 (StatusCode::CONFLICT, "no oracle quorum assembled yet".to_string()).into_response()
             }
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m).into_response(),
+            ApiError::Stale(m) => (StatusCode::CONFLICT, m).into_response(),
             ApiError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m).into_response(),
         }
     }
@@ -496,6 +525,101 @@ async fn redeem(
     run_op(&s, "redeem", move |w| w.redeem(which, Obol::new(req.amount), &tick)).await
 }
 
+// --- external owner signing (the M6/M10 seam, in the UI) --------------------------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportReq {
+    /// The owner op to export: "close", "repay", or "draw" (the signature-bearing ops).
+    pub op: String,
+    pub vault: Option<String>,
+    /// Required for repay / draw, ignored for close.
+    pub amount: Option<u64>,
+}
+
+/// Export an owner op for external signing: build it unsigned, stash the plan on THIS
+/// state (bounded), and return the owner digest for an off-machine key. The owner key need
+/// never touch this process; the funding key stays hot and signs at apply time.
+async fn export_op(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<ExportReq>,
+) -> Result<Json<styx_pset::signing::OwnerSigningRequest>, ApiError> {
+    let which = vault_arg(&req.vault)?;
+    let tick = match req.op.as_str() {
+        "draw" => Some(s.current_tick()?),
+        _ => None,
+    };
+    let amount = req.amount.map(Obol::new);
+    let op = req.op.clone();
+    let wallet = s.wallet.clone();
+    let state = s.clone();
+    let request = tokio::task::spawn_blocking(move || -> Result<_, ApiError> {
+        let mut w = wallet.lock().unwrap_or_else(|e| e.into_inner());
+        let plan = match op.as_str() {
+            "close" => w.close_unsigned(which)?,
+            "repay" => w.repay_unsigned(which, amount.ok_or_else(|| miss("amount"))?)?,
+            "draw" => {
+                let tick = tick.ok_or(ApiError::NoQuorum)?;
+                w.draw_unsigned(which, amount.ok_or_else(|| miss("amount"))?, &tick)?
+            }
+            other => return Err(ApiError::BadRequest(format!("not an owner op: {other}"))),
+        };
+        let request = styx_pset::signing::owner_signing_request(&w.ctx, &plan)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        state.stash_pending(request.txid.clone(), plan);
+        Ok(request)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("export task: {e}")))??;
+    s.emit("export", request.txid.clone());
+    Ok(Json(request))
+}
+
+fn miss(field: &str) -> ApiError {
+    ApiError::BadRequest(format!("{field} is required for this op"))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyReq {
+    pub txid: String,
+    /// The external owner signature over the exported digest, hex.
+    pub owner_sig: String,
+}
+
+/// Complete a previously exported plan: install the verified owner signature, sign the
+/// funding inputs with the hot key, broadcast. An unknown txid is a 400; a chain that moved
+/// under the plan (broadcast conflict) is a 409 telling the caller to re-export.
+async fn apply_signed(
+    State(s): State<Arc<AppState>>,
+    Json(req): Json<ApplyReq>,
+) -> Result<Json<OpView>, ApiError> {
+    let wallet = s.wallet.clone();
+    let state = s.clone();
+    let view = tokio::task::spawn_blocking(move || -> Result<OpView, ApiError> {
+        // Work on the stashed CLONE and only drop it on success: a rejected signature (wrong
+        // device, typo) must not force a re-export.
+        let mut plan = state
+            .take_pending(&req.txid)
+            .ok_or_else(|| ApiError::BadRequest(format!("no pending plan for {}", req.txid)))?;
+        let w = wallet.lock().unwrap_or_else(|e| e.into_inner());
+        styx_pset::signing::apply_owner_sig(&w.ctx, &mut plan, &req.owner_sig)
+            .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+        let txid = w.finalize_broadcast(&plan).map_err(|e| {
+            // The signature was good but the broadcast failed: the chain moved under the
+            // exported plan (the vault was liquidated or spent). Drop it; re-export.
+            state.drop_pending(&req.txid);
+            ApiError::Stale(e.to_string())
+        })?;
+        state.drop_pending(&req.txid);
+        Ok(OpView { txid: txid.to_string(), vault: None })
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("apply task: {e}")))??;
+    s.emit("apply", view.txid.clone());
+    Ok(Json(view))
+}
+
 /// The full application router: the token-gated API merged with the page-tier UI (its
 /// own Host/Origin-only gate).
 pub fn router(state: Arc<AppState>, g: Arc<Gate>) -> Router {
@@ -514,6 +638,8 @@ fn api_router(state: Arc<AppState>, g: Arc<Gate>) -> Router {
         .route("/api/redeem", post(redeem))
         .route("/api/keeper/start", post(keeper_start))
         .route("/api/keeper/stop", post(keeper_stop))
+        .route("/api/export", post(export_op))
+        .route("/api/apply", post(apply_signed))
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(g, gate))
 }

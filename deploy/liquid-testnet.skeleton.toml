@@ -36,4 +36,4 @@ nostr_pk = "REPLACE"
 admin_url = "http://ORACLE-4-LAN:9700"
 
 [nostr]
-relays = ["wss://relay.YOURDOMAIN.example"]
+relays = ["wss://relay.testnet.styx.network"]

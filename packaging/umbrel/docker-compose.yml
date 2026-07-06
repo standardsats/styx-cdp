@@ -1,0 +1,35 @@
+# Umbrel app: styx-app plus its own Liquid-testnet node. Images are the flake's,
+# published per deploy/docker/README.md (tag = flake rev). The app UI reaches the user
+# through Umbrel's app proxy, which is the one sanctioned relaxation of the loopback rule -
+# behind Umbrel's own auth and Tor, never a raw public bind.
+version: "3.7"
+services:
+  app_proxy:
+    environment:
+      APP_HOST: styx_app_1
+      APP_PORT: 9780
+
+  elementsd:
+    image: styx-elementsd:REV
+    restart: on-failure
+    volumes:
+      - ${APP_DATA_DIR}/data/node:/data
+      - ${APP_DATA_DIR}/elements.conf:/data/elements.conf:ro
+
+  app:
+    image: styx-app:REV
+    restart: on-failure
+    depends_on: [elementsd]
+    command: ["--config", "/etc/styx/app.toml"]
+    # app.toml MUST carry a [proxy] section - the app_proxy container reaches this one over
+    # the compose network, not loopback, and Umbrel serves the app over plain http (LAN and
+    # onion both). Loopback-only, or an https-only origin rule, would 403 every request. Set
+    # allow_hosts / allow_origins to the exact Host / Origin Umbrel sends (verify on-box):
+    #   [proxy]
+    #   bind = "0.0.0.0:9780"
+    #   allow_hosts = ["umbrel.local:9780", "<your-onion>.onion"]
+    #   allow_origins = ["http://umbrel.local:9780", "http://<your-onion>.onion"]
+    volumes:
+      - ${APP_DATA_DIR}/app.toml:/etc/styx/app.toml:ro
+      - ${APP_DATA_DIR}/liquid-testnet.toml:/etc/styx/liquid-testnet.toml:ro
+      - ${APP_DATA_DIR}/state:/var/lib/styx

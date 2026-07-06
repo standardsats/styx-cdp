@@ -69,4 +69,10 @@ impl VaultOp {
             other => other,
         }
     }
+
+    /// Whether the op carries an owner signature: close / repay / draw need one, the
+    /// permissionless arms (liquidate / full-liq / bad-debt / redeem / refresh) do not.
+    pub fn is_owner_op(&self) -> bool {
+        matches!(self, VaultOp::Close { .. } | VaultOp::Repay { .. } | VaultOp::Draw { .. })
+    }
 }

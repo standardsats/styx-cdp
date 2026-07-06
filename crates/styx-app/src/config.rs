@@ -35,6 +35,30 @@ pub struct AppConfig {
     /// pace when running.
     #[serde(default = "default_poll_ms")]
     pub poll_ms: u64,
+    /// The platform-proxy relaxation, absent by default. Present ONLY for Umbrel / StartOS,
+    /// where the app runs in one container and the platform's authenticated proxy runs in
+    /// another: the app binds where the proxy can reach it (not loopback) and answers to
+    /// the proxy's hostnames. This is the single sanctioned way past the loopback rule, and
+    /// it is opt-in config, not a silent manifest default.
+    pub proxy: Option<ProxyConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyConfig {
+    /// Where to actually listen - reachable from the proxy container (e.g. `0.0.0.0:9780`).
+    /// The loopback rule does not apply here BY DESIGN; the platform's tunnel and auth are
+    /// the perimeter instead.
+    pub bind: String,
+    /// The exact Host-header values the platform proxy forwards, port included where it
+    /// sends one (`umbrel.local:9780`, `<onion>.onion`, `styx.local`).
+    #[serde(default)]
+    pub allow_hosts: Vec<String>,
+    /// The exact Origin values the proxied browser sends, scheme included and matched whole.
+    /// Configured, not inferred: Umbrel LAN and Tor onion are plain `http://`, only a
+    /// StartOS LAN cert is `https://` (`["http://umbrel.local:9780", "http://<onion>.onion"]`).
+    #[serde(default)]
+    pub allow_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,13 +108,30 @@ impl AppConfig {
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let cfg: AppConfig = toml::from_str(text).map_err(|e| ConfigError::Toml(e.to_string()))?;
-        cfg.listen_addr()?; // refuse a non-loopback listener before anything runs
+        cfg.bind()?; // resolve the bind now: a bad or (non-proxy) non-loopback bind fails early
         Ok(cfg)
     }
 
-    pub fn listen_addr(&self) -> Result<SocketAddr, ConfigError> {
-        let addr: SocketAddr =
-            self.listen.parse().map_err(|_| ConfigError::Listen(self.listen.clone()))?;
+    /// How the app binds and which hosts/origins it answers to: `(addr, proxy_hosts,
+    /// proxy_origins)`. `[proxy]` present is the explicit platform relaxation (bind
+    /// anywhere, add its hostnames and origins); otherwise the loopback rule holds, with
+    /// `STYX_APP_LISTEN` a loopback-checked override for the desktop shell.
+    pub fn bind(&self) -> Result<(SocketAddr, Vec<String>, Vec<String>), ConfigError> {
+        if let Some(proxy) = &self.proxy {
+            let addr: SocketAddr =
+                proxy.bind.parse().map_err(|_| ConfigError::Listen(proxy.bind.clone()))?;
+            return Ok((addr, proxy.allow_hosts.clone(), proxy.allow_origins.clone()));
+        }
+        let addr = self.resolve_listen(std::env::var("STYX_APP_LISTEN").ok().as_deref())?;
+        Ok((addr, Vec::new(), Vec::new()))
+    }
+
+    /// The bind address for the loopback path: `STYX_APP_LISTEN` overrides the config, but
+    /// the loopback rule holds for both - an env var cannot open the app to the network any
+    /// more than the config file can.
+    pub fn resolve_listen(&self, env: Option<&str>) -> Result<SocketAddr, ConfigError> {
+        let raw = env.unwrap_or(&self.listen);
+        let addr: SocketAddr = raw.parse().map_err(|_| ConfigError::Listen(raw.to_string()))?;
         if !addr.ip().is_loopback() {
             return Err(ConfigError::NonLoopback(addr));
         }

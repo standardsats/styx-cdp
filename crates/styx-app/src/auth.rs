@@ -36,29 +36,69 @@ impl GateError {
 
 pub struct Gate {
     token: String,
-    /// The exact Host values this listener answers to: the bound address as written
-    /// (`127.0.0.1:p`, `[::1]:p`, whatever loopback the config chose) plus `localhost:p`.
-    hosts: [String; 2],
+    /// The Host values this listener answers to directly: the bound address as written
+    /// (`127.0.0.1:p`, `[::1]:p`) plus `localhost:p`. The loopback page is reached over
+    /// plain http, so its Origins are `http://<one of these>`.
+    hosts: Vec<String>,
+    /// Extra Host values reached through a platform's proxy (Umbrel / StartOS): the
+    /// EXPLICIT, opt-in relaxation of the loopback rule. Exact Host-header form, PORT
+    /// INCLUDED where the platform sends one (`umbrel.local:9780`). Empty without a
+    /// `[proxy]` section.
+    proxy_hosts: Vec<String>,
+    /// The full Origin strings the proxied browser sends, matched whole - scheme included.
+    /// The platforms are NOT uniformly https: Umbrel serves apps over plain http on the LAN
+    /// and Tor onion origins are `http://` too (Tor is the transport security); only a
+    /// StartOS LAN cert is https. So the scheme is configured, not inferred - requiring
+    /// https would 403 two of the three real paths.
+    proxy_origins: Vec<String>,
 }
 
 impl Gate {
-    /// Mint a session gate for the actual bound address: a fresh 32-byte token,
-    /// hex-encoded. Minting from the address (not just the port) keeps the allowlist in
-    /// lockstep with the config's loopback choice - a `[::1]` listener must answer to
-    /// `Host: [::1]:p`.
+    /// Mint a loopback session gate: a fresh 32-byte token, hex-encoded. Minting from the
+    /// address (not just the port) keeps the allowlist in lockstep with the config's
+    /// loopback choice - a `[::1]` listener must answer to `Host: [::1]:p`.
     pub fn mint(addr: std::net::SocketAddr) -> Gate {
+        Gate::mint_proxied(addr, Vec::new(), Vec::new())
+    }
+
+    /// Mint a gate that ALSO answers to a platform proxy: `proxy_hosts` on the Host header
+    /// and `proxy_origins` on the Origin header (both exact). The token gate still applies
+    /// to every `/api` call; the platform's authenticated tunnel is the perimeter in front.
+    pub fn mint_proxied(
+        addr: std::net::SocketAddr,
+        proxy_hosts: Vec<String>,
+        proxy_origins: Vec<String>,
+    ) -> Gate {
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        Gate { token, hosts: [addr.to_string(), format!("localhost:{}", addr.port())] }
+        Gate {
+            token,
+            hosts: vec![addr.to_string(), format!("localhost:{}", addr.port())],
+            proxy_hosts,
+            proxy_origins,
+        }
     }
 
     pub fn token(&self) -> &str {
         &self.token
     }
 
+    /// The Host header must name this listener or a configured proxy host, exactly.
     fn host_ok(&self, host: &str) -> bool {
-        self.hosts.iter().any(|h| h == host)
+        self.hosts.iter().any(|h| h == host) || self.proxy_hosts.iter().any(|h| h == host)
+    }
+
+    /// A loopback Origin is `http://<a bound host>`; a proxy Origin must match a configured
+    /// full origin verbatim. Neither a same-machine `https://127.0.0.1` (no TLS there) nor a
+    /// cross-site origin is either.
+    fn origin_ok(&self, origin: &str) -> bool {
+        if let Some(rest) = origin.strip_prefix("http://") {
+            if self.hosts.iter().any(|h| h == rest) {
+                return true;
+            }
+        }
+        self.proxy_origins.iter().any(|o| o == origin)
     }
 
     /// The page-tier check: Host (anti-rebinding) and Origin only, no token. The served
@@ -71,8 +111,7 @@ impl Gate {
             return Err(GateError::ForbiddenHost);
         }
         if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
-            let ok = origin.strip_prefix("http://").map(|rest| self.host_ok(rest)).unwrap_or(false);
-            if !ok {
+            if !self.origin_ok(origin) {
                 return Err(GateError::ForbiddenOrigin);
             }
         }

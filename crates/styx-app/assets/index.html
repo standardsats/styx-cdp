@@ -74,6 +74,33 @@
   </section>
 
   <section class="card wide">
+    <h2>External signer</h2>
+    <p class="muted">sign an owner op with a key kept off this machine: export the digest,
+    sign it on your device, paste the signature back. The funding key stays here; the owner
+    key never touches the app.</p>
+    <form id="export-form">
+      <label>op
+        <select name="op">
+          <option value="close">close</option>
+          <option value="repay">repay</option>
+          <option value="draw">draw</option>
+        </select>
+      </label>
+      <label>amount (repay / draw) <input name="amount" type="number" min="1"></label>
+      <label>vault
+        <select name="vault" id="export-vault"><option value="">(only vault)</option></select>
+      </label>
+      <button>export digest</button>
+    </form>
+    <div id="export-out" class="hidden">
+      <div class="row"><span class="k">txid</span> <code id="export-txid"></code></div>
+      <div class="row"><span class="k">digest</span> <code id="export-digest"></code></div>
+      <label>owner signature (128 hex) <input id="apply-sig" type="text"></label>
+      <button id="apply-btn">apply and broadcast</button>
+    </div>
+  </section>
+
+  <section class="card wide">
     <h2>Journal</h2>
     <ul id="journal"></ul>
   </section>

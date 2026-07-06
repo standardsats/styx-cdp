@@ -1,0 +1,19 @@
+# NOT a workspace member: this builds only on a machine with the platform webview toolchain
+# and the Tauri CLI (`cargo tauri build`). Pinned so a reviewed build is reproducible.
+[package]
+name = "styx-desktop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A native shell around the bundled styx-app (webview over its loopback origin)"
+
+[build-dependencies]
+tauri-build = "=2.0.4"
+
+[dependencies]
+tauri = { version = "=2.1.1", features = [] }
+dirs = "=5.0.1"
+
+[[bin]]
+name = "styx-desktop"
+path = "src/main.rs"

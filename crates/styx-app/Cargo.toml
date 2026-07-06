@@ -8,6 +8,7 @@ description = "STYX v1 local application: the wallet and the keeper behind one l
 [dependencies]
 styx-core = { path = "../styx-core" }
 styx-node = { path = "../styx-node" }
+styx-pset = { path = "../styx-pset" }
 styx-wallet = { path = "../styx-wallet" }
 styx-watch = { path = "../styx-watch" }
 styx-keeper = { path = "../styx-keeper" }

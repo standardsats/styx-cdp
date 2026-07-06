@@ -1,0 +1,23 @@
+manifestVersion: 1
+id: styx
+name: STYX
+tagline: A covenant CDP on Liquid - your keys, your machine
+category: finance
+version: "REV"
+port: 9780
+description: >-
+  Open a Liquid vault, mint OBOL against it, and run a keeper - all on your own node.
+  The wallet and the keeper live here; keys never leave the box. The vault owner key can
+  additionally sign off-machine (an external signer over the exported digest).
+developer: STYX
+website: https://styx.network
+repo: https://github.com/styx-network/cdp-styx-v1
+support: https://github.com/styx-network/cdp-styx-v1/issues
+gallery: []
+releaseNotes: ""
+dependencies: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+submitter: STYX
+submission: https://github.com/getumbrel/umbrel-apps

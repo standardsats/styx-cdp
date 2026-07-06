@@ -44,18 +44,25 @@ function fmt(n) {
   return Number(n).toLocaleString("en-US");
 }
 
-function renderVaults(st) {
-  const tbody = $("vaults").querySelector("tbody");
-  tbody.textContent = "";
-  const select = $("vault-select");
+function fillVaultSelect(id, vaults) {
+  const select = $(id);
   const chosen = select.value;
   select.textContent = "";
   select.append(new Option("(only vault)", ""));
+  for (const v of vaults) {
+    const short = v.outpoint.slice(0, 8) + ":" + v.outpoint.split(":")[1];
+    select.append(new Option(short, v.outpoint));
+  }
+  if (chosen) select.value = chosen;
+}
+
+function renderVaults(st) {
+  const tbody = $("vaults").querySelector("tbody");
+  tbody.textContent = "";
   for (const v of st.vaults) {
     const tr = document.createElement("tr");
     const short = v.outpoint.slice(0, 8) + ":" + v.outpoint.split(":")[1];
     const cr = v.cr_percent == null ? "-" : v.cr_percent + "%";
-    tr.innerHTML = "";
     for (const [text, cls] of [
       [short, ""],
       [fmt(v.debt_units), ""],
@@ -70,9 +77,9 @@ function renderVaults(st) {
     }
     tr.append(document.createElement("td"));
     tbody.append(tr);
-    select.append(new Option(short, v.outpoint));
   }
-  if (chosen) select.value = chosen;
+  fillVaultSelect("vault-select", st.vaults);
+  fillVaultSelect("export-vault", st.vaults);
   $("novaults").classList.toggle("hidden", st.vaults.length > 0);
 }
 
@@ -150,6 +157,45 @@ $("keeper-toggle").addEventListener("click", async () => {
     await refresh();
   } catch (e) {
     journal("keeper_error", e.message);
+  }
+});
+
+let exportedTxid = null;
+
+$("export-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const op = f.get("op");
+  const body = { op };
+  if (f.get("vault")) body.vault = f.get("vault");
+  if (op === "repay" || op === "draw") {
+    if (!f.get("amount")) { journal("rejected", op + ": amount required"); return; }
+    body.amount = Number(f.get("amount"));
+  }
+  try {
+    const r = await api("/api/export", body);
+    exportedTxid = r.txid;
+    $("export-txid").textContent = r.txid;
+    $("export-digest").textContent = r.sighash;
+    $("export-out").classList.remove("hidden");
+    journal("export", r.txid);
+  } catch (e) {
+    journal("rejected", "export: " + e.message);
+  }
+});
+
+$("apply-btn").addEventListener("click", async () => {
+  if (!exportedTxid) return;
+  const sig = $("apply-sig").value.trim();
+  try {
+    const r = await api("/api/apply", { txid: exportedTxid, owner_sig: sig });
+    journal("apply", r.txid);
+    $("export-out").classList.add("hidden");
+    $("apply-sig").value = "";
+    exportedTxid = null;
+    await refresh();
+  } catch (e) {
+    journal("rejected", "apply: " + e.message);
   }
 });
 

@@ -1,0 +1,59 @@
+# Per-platform release binaries, tagged by the git rev (the provenance the container images
+# already carry). On a version tag: build the six binaries for each target, name them with
+# the tag and short rev, checksum, and attach to the release.
+#
+# The strong reproducibility claim is `nix build .#styx` (bit-for-bit from the flake). These
+# convenience binaries pin the toolchain below so a `checkout + cargo build --release` on the
+# same rev also matches; treat the nix path as the source of truth.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provenance
+        id: rev
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      # Pinned so a same-rev checkout+build reproduces these artifacts.
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin styx-wallet --bin styx-keeper --bin styx-oracle \
+            --bin styx-deploy --bin styx-explorer --bin styx-app
+      - name: Package
+        run: |
+          set -euo pipefail
+          rev="${{ steps.rev.outputs.short }}"
+          tag="${GITHUB_REF_NAME}"
+          dir="styx-${tag}-${rev}-${{ matrix.target }}"
+          mkdir "$dir"
+          # Explicit list, no glob-swallow: a missing binary must fail the job, not ship a
+          # short tarball that reads as green.
+          for b in styx-wallet styx-keeper styx-oracle styx-deploy styx-explorer styx-app; do
+            cp "target/${{ matrix.target }}/release/$b" "$dir/$b"
+          done
+          tar czf "$dir.tar.gz" "$dir"
+          # sha256sum is GNU-only; shasum ships on macOS and Linux both.
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            styx-*.tar.gz
+            styx-*.tar.gz.sha256

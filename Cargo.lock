@@ -2108,6 +2108,7 @@ dependencies = [
  "styx-core",
  "styx-keeper",
  "styx-node",
+ "styx-pset",
  "styx-wallet",
  "styx-watch",
  "thiserror 1.0.69",
@@ -2208,6 +2209,8 @@ name = "styx-pset"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "serde",
+ "serde_json",
  "styx-core",
  "thiserror 1.0.69",
 ]

@@ -273,12 +273,30 @@ explorer that cannot sign by construction.
   tier proves the bands and the internality; the e2e replays a full crash cascade and the
   explorer tells the story back (every chapter in the feed, pot at supply, no vaults).
   The soak-length uptime run rides the T2 ops-half soak, where a long-lived chain exists.
-- [ ] **U3 - packaging.** The same assets and API wrapped in Tauri for the desktop
-  single-binary feel (a shell, not a rewrite); Umbrel / Start9 packaging of styx-app +
-  elementsd (the node-runner audience is the keeper audience); per-platform release
-  binaries with the flake rev as the provenance tag, matching the container images. PSET
-  export in the UI (the vault_sighash / install_owner_sig seam from M6/M10) as the
-  external-signer story.
+- [x] **U3 - packaging + the external-signer seam.** The substance is the portable owner
+  signature: `styx_pset::signing` exports the owner digest (`OwnerSigningRequest`, txid +
+  sighash + key), an off-machine key signs it, and `apply_owner_sig` verifies against the
+  vault owner before installing - the M6/M10 seam made serializable, refuse-early like the
+  funding-sig check. It reaches the UI as an "External signer" card over `/api/export`
+  (close / repay / draw) + `/api/apply`, on a pending store owned by AppState (bounded; a
+  rejected signature keeps the plan, a chain that moved under it is a 409 to re-export),
+  built on the wallet's `*_unsigned` / `finalize_broadcast` split; the owner key never
+  touches the app while the funding key stays hot. Fast tier: the round trip and its
+  refusals. Acceptance on node: a vault opened through the API closes with an owner
+  signature produced entirely off the app. The loopback rule has ONE sanctioned relaxation,
+  and it is an explicit config seam, not a manifest fiat: an app.toml `[proxy]` section
+  (bind + allow_hosts, folded into the Host/Origin allowlist) for Umbrel/StartOS, default-
+  deny and negative-tested. Packaging is scaffolded and rev-tagged, scoped in PACKAGING.md:
+  a Tauri shell that points a webview at the bundled app's loopback origin (no second
+  frontend, a kill-on-drop child so no headless wallet survives the window, pinned
+  Cargo.toml), Umbrel/Start9 manifests + compose running the two flake images behind the
+  platform proxy, an explorer-image, and a tagged release workflow (pinned toolchain,
+  portable checksums, explicit binary list). The GUI bundles, store submissions, and
+  per-platform binaries need their own toolchains (CI), not the workspace build - marked as
+  such, sources pinned to the flake rev.
+
+The UI phase is complete: the wallet, the keeper, and the read-only explorer all ship, with
+an external-signer path for the vault owner key.
 
 Out of scope for these phases: FROST / multisig of the oracle protocol key, authentication
 of the oracle admin surface (it signs on demand and moves the price, so it binds loopback /

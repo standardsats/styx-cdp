@@ -180,9 +180,10 @@ The same bring-up with three differences, all already encoded in the tooling:
   wallet's coins must be explicit for the raw ceremony paths): create the wallet, get an
   address, `getaddressinfo` it and use the `unconfidential` form with the faucet. Fund it
   well: the ceremony pays the issuances, the reserve seed, and every user bootstrap later.
-- The relay goes behind TLS. `deploy/Caddyfile.example` terminates
-  `wss://relay.YOURDOMAIN` and proxies to nostr-rs-relay on loopback; the published
-  config then lists the wss URL.
+- The relay and the explorer go behind TLS. `deploy/Caddyfile.example` terminates
+  `wss://relay.testnet.styx.network` (proxying nostr-rs-relay on loopback) and
+  `https://explorer.testnet.styx.network` (proxying the explorer, and publishing the
+  completed config at `/config`); the published config then lists the wss URL.
 
 Skeleton: `deploy/liquid-testnet.skeleton.toml` (chain = liquidtestnet). Oracles run one
 exchange each (`[feed]` in oracle.toml with `max_age_secs` armed - a quiet feed must

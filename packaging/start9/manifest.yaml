@@ -1,0 +1,52 @@
+# Start9 (StartOS) service manifest. Same two flake images as Umbrel. The UI is reached
+# through StartOS's authenticated proxy (Tor / LAN); the app binds where that proxy can
+# reach it and answers to its hosts/origins via the app.toml [proxy] section (NOT loopback
+# - see the sibling docker-compose.yml and deploy/app.toml.example). Building and publishing
+# needs the start-sdk toolchain - an ops step, not a repo build.
+id: styx
+title: "STYX"
+version: 0.1.0
+release-notes: "Initial packaging"
+license: MIT
+wrapper-repo: "https://github.com/styx-network/cdp-styx-v1"
+upstream-repo: "https://github.com/styx-network/cdp-styx-v1"
+support-site: "https://github.com/styx-network/cdp-styx-v1/issues"
+marketing-site: "https://styx.network"
+build: ["true"]
+description:
+  short: "A covenant CDP on Liquid - your keys, your machine"
+  long: >-
+    Open a Liquid vault, mint OBOL, run a keeper, all on your own node. Keys never leave
+    the box; the vault owner key can additionally sign off-machine over the exported digest.
+assets:
+  license: LICENSE
+  icon: icon.png
+  instructions: instructions.md
+# Two containers ship via the sibling docker-compose.yml (the app + its elementsd); a
+# production s9pk wires them through the StartOS SDK. This manifest declares the app main.
+main:
+  type: docker
+  image: main
+  entrypoint: "styx-app"
+  args: ["--config", "/etc/styx/app.toml"]
+  mounts:
+    main: /var/lib/styx
+health-checks: {}
+config: {}
+properties: ~
+volumes:
+  main:
+    type: data
+interfaces:
+  main:
+    name: STYX UI
+    description: "The wallet and keeper UI, over the StartOS proxy"
+    tor-config:
+      port-mapping:
+        80: "9780"
+    lan-config:
+      443:
+        ssl: true
+        internal: 9780
+    ui: true
+    protocols: [tcp, http]

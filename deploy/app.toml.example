@@ -1,0 +1,42 @@
+# styx-app: the wallet and the keeper behind one local web UI. Open http://127.0.0.1:9780
+# after starting it; the page prints its own session token, every request carries it, and
+# the listener refuses anything but loopback - the UI is served by YOUR binary on YOUR
+# machine, keys never leave it.
+#
+# Same fields as wallet.toml (the app IS a wallet), plus the listener and the keeper knobs.
+
+styxnet = "/home/you/.styx/liquid-testnet.toml"
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "REPLACE"          # your node's rpcauth password
+snapshot = "/home/you/.styx/app-snapshot.json"
+owner_seckey = "REPLACE"          # from `styx-wallet keygen`
+funding_seckey = "REPLACE"        # from `styx-wallet keygen`
+
+# The loopback listener. Only 127.0.0.1 / ::1 are accepted; a public bind is a refused
+# config (a remote UI is out of scope by design).
+listen = "127.0.0.1:9780"
+
+# How often the app re-assembles a tick from the relays and paces the keeper loop.
+poll_ms = 2000
+
+# Keeper-mode defaults (start it from the UI). poke_lag / refresh_lag are in blocks.
+[keeper]
+poke_lag = 4
+refresh_lag = 16
+
+# ONLY for Umbrel / StartOS: the platform runs its authenticated proxy in a separate
+# container, so the app must bind where that container can reach it (not loopback) and
+# answer to the platform's hostnames. This is the single sanctioned way past the
+# loopback-only rule - opt-in, and the platform's tunnel + auth are the perimeter. Leave
+# it out for a normal desktop / server install.
+#
+# allow_hosts = the EXACT Host header the proxy forwards (port included where it sends one).
+# allow_origins = the EXACT Origin the browser sends, scheme and all - Umbrel LAN and Tor
+# onion are plain http, only a StartOS LAN cert is https, so set the scheme to match.
+# NOTE: not yet verified on a live Umbrel / StartOS box - confirm the exact Host/Origin your
+# platform sends (its logs, or a curl through the proxy) before trusting these values.
+# [proxy]
+# bind = "0.0.0.0:9780"
+# allow_hosts = ["umbrel.local:9780", "<your-onion>.onion"]
+# allow_origins = ["http://umbrel.local:9780", "http://<your-onion>.onion"]

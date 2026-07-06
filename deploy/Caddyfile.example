@@ -1,6 +1,28 @@
-# TLS termination for the public quote relay: Caddy fetches and renews the certificate
-# itself; nostr-rs-relay stays plain-ws on loopback. Users connect to
-# wss://relay.YOURDOMAIN.example (nostr-sdk speaks wss natively).
-relay.YOURDOMAIN.example {
+# TLS termination for the public surfaces: Caddy fetches and renews the certificates
+# itself. The relay stays plain-ws on loopback; the explorer stays plain-http on loopback.
+# Replace the hostnames with your own domain (the STYX public testnet uses these).
+
+# The quote relay - nostr-sdk speaks wss natively.
+relay.testnet.styx.network {
 	reverse_proxy 127.0.0.1:7877
 }
+
+# The read-only explorer, plus the config-download path the wallet quickstart points at.
+# Both routes wrapped in handle blocks so the match order is explicit, not directive-order
+# dependent.
+explorer.testnet.styx.network {
+	# Publish the completed deployment config at /config (a static file); TESTNET.md sends
+	# users to https://explorer.testnet.styx.network/config.
+	handle /config {
+		root * /var/lib/styx
+		rewrite * /liquid-testnet.toml
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:9790
+	}
+}
+
+# The five oracles are reached by nostr over the relay, so they need no public HTTP. Their
+# admin surfaces (price override, /health) stay loopback / operator-VPN only - never expose
+# oracle{0..4}.testnet.styx.network's :9700 to the internet.

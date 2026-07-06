@@ -98,11 +98,11 @@ async fn tick_loop(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let cfg = AppConfig::load(&args.config)?;
-    let addr = cfg.listen_addr()?;
+    let (addr, proxy_hosts, proxy_origins) = cfg.bind()?;
     let wallet = Wallet::open_session(&cfg.purse)?;
     let oracle_pks = wallet.ctx.params.oracle_pks;
 
-    let gate = Arc::new(Gate::mint(addr));
+    let gate = Arc::new(Gate::mint_proxied(addr, proxy_hosts.clone(), proxy_origins));
     let poll = Duration::from_millis(cfg.poll_ms);
     let state = AppState::new(wallet, cfg.keeper.opts(), poll);
 
@@ -110,6 +110,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = Node::from_url(&cfg.purse.rpc_url, cfg.purse.auth()?)?;
     tokio::spawn(tick_loop(net, node, oracle_pks, state.clone(), poll));
 
+    if !addr.ip().is_loopback() {
+        println!(
+            "styx-app bound NON-LOOPBACK at {addr} for a platform proxy; answering hosts {proxy_hosts:?}"
+        );
+    }
     println!("styx-app up: open http://{addr}/ in your browser");
     println!("  the page carries the session token; for curl: X-Styx-Token {}", gate.token());
 

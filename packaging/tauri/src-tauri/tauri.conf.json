@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "STYX",
+  "identifier": "org.styx.app",
+  "build": {
+    "beforeBuildCommand": "",
+    "frontendDist": "../ui-placeholder"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "STYX",
+        "width": 1100,
+        "height": 820,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

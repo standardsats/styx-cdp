@@ -18,6 +18,7 @@ pub mod layout;
 pub mod plan;
 pub mod pset;
 pub mod sign;
+pub mod signing;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub mod testkit;
 

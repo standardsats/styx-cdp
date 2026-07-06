@@ -12,6 +12,7 @@ use styx_pset::build;
 use styx_pset::intent::{
     CloseIntent, DrawIntent, FundingCoin, ObolCoin, OpenIntent, RedeemIntent, RefreshIntent, RepayIntent,
 };
+use styx_pset::plan::TxPlan;
 use styx_pset::sign::owner_sign;
 
 use crate::wallet::{Wallet, WalletError, FEE};
@@ -233,7 +234,6 @@ impl Wallet {
         amount: Obol,
     ) -> Result<Txid, WalletError> {
         use styx_pset::layout::{claimed, fee_out, txin, txout};
-        use styx_pset::plan::TxPlan;
 
         let (payer_op, payer_val) = self.ensure_obol(amount.raw())?;
         let (fee_op, fee_val) = self.pick_lbtc(FEE.raw() + 1)?;
@@ -397,6 +397,90 @@ impl Wallet {
 
     pub fn close(&mut self, which: Option<OutPoint>) -> Result<OpReport, WalletError> {
         self.with_retry("close", |w| w.close_once(which))
+    }
+
+    /// Build a CLOSE plan WITHOUT the owner signature: the external-signer path. The caller
+    /// exports the owner digest (`styx_pset::signing`), an off-machine key signs it,
+    /// `install_owner_sig` fills it, and `finalize_broadcast` completes it. No retry loop -
+    /// an external round trip cannot be transparently rebuilt against fresh state.
+    pub fn close_unsigned(&mut self, which: Option<OutPoint>) -> Result<TxPlan, WalletError> {
+        self.sync()?;
+        let protocol = self.protocol()?;
+        let vault = self.pick_vault(which)?;
+        let (payer_op, payer_val) = self.ensure_obol(vault.state.debt.raw())?;
+        let built = build::close::close(
+            &self.ctx,
+            &protocol.pot,
+            &vault,
+            &CloseIntent {
+                payer: self.obol_coin(payer_op, payer_val),
+                recipient_spk: self.funding_spk(),
+                payer_change_spk: self.funding_spk(),
+                fee: FEE,
+            },
+        )?;
+        Ok(built.plan)
+    }
+
+    /// A REPAY plan without the owner signature (the external-signer path; see
+    /// `close_unsigned`).
+    pub fn repay_unsigned(
+        &mut self,
+        which: Option<OutPoint>,
+        amount: Obol,
+    ) -> Result<TxPlan, WalletError> {
+        self.sync()?;
+        let protocol = self.protocol()?;
+        let vault = self.pick_vault(which)?;
+        let (payer_op, payer_val) = self.ensure_obol(amount.raw())?;
+        let fee_coins: Vec<_> =
+            self.lbtc_coins()?.into_iter().filter(|(op, _)| *op != payer_op).collect();
+        let (fee_op, fee_val) =
+            Wallet::select_at_least(&fee_coins, FEE.raw() + 1).ok_or(WalletError::InsufficientLbtc {
+                need: FEE.raw() + 1,
+                have: fee_coins.iter().map(|(_, v)| *v).sum(),
+            })?;
+        let built = build::repay::repay(
+            &self.ctx,
+            &protocol.pot,
+            &vault,
+            &RepayIntent {
+                amount,
+                payer: self.obol_coin(payer_op, payer_val),
+                payer_change_spk: self.funding_spk(),
+                fee_coin: self.funding_coin(fee_op, fee_val),
+                change_spk: self.funding_spk(),
+                fee: FEE,
+            },
+        )?;
+        Ok(built.plan)
+    }
+
+    /// A DRAW plan without the owner signature (the external-signer path; see
+    /// `close_unsigned`).
+    pub fn draw_unsigned(
+        &mut self,
+        which: Option<OutPoint>,
+        amount: Obol,
+        tick: &OracleTick,
+    ) -> Result<TxPlan, WalletError> {
+        self.sync()?;
+        let protocol = self.protocol()?;
+        let vault = self.pick_vault(which)?;
+        let built = build::draw::draw(
+            &self.ctx,
+            &protocol,
+            &vault,
+            &DrawIntent { amount, borrower_spk: self.funding_spk(), tick: tick.clone(), fee: FEE },
+        )?;
+        Ok(built.plan)
+    }
+
+    /// Finalize an externally owner-signed plan: sign the funding inputs with the hot key
+    /// and broadcast. The owner op must already carry its signature (a placeholder plan is
+    /// rejected by the covenant, not silently sent).
+    pub fn finalize_broadcast(&self, plan: &TxPlan) -> Result<Txid, WalletError> {
+        self.sign_and_broadcast(plan)
     }
 
     pub fn redeem(

@@ -54,7 +54,16 @@ the core stays minimal.
   recovered by spk-matched scans (nLockTime only bounds them from above) - with candidate
   owner keys as the wallet's filter seam (a vault with no matching candidate is tracked
   opaque, an unrecognizable spend of a known vault is marked lost); the atomic JSON snapshot
-  (`snapshot.rs`); the RPC catch-up scan (`sync.rs`). The Nostr quote client lands in R2.
+  (`snapshot.rs`); the RPC catch-up scan (`sync.rs`); the quote client - a verified book
+  (`quotes.rs`: every wire quote checked against the covenant oracle keys before caching,
+  3-of-5 tick assembly grouped by backing_k) behind the `QuoteTransport` seam
+  (`transport.rs`: in-memory hub for tests; `nostr.rs`: addressable events with d = height,
+  replacement semantics, author filtering as spam control - the protocol signature is the
+  trust root, the Nostr identity is carriage).
+- **styx-oracle** - one quorum slot as a daemon: signs the configured price at every new
+  block of its own elementsd, publishes over Nostr, and serves the debug/admin HTTP surface
+  (/health, /quote?height as the fallback channel, POST /price as the scenario lever). The
+  price sits behind a `set_price` seam a real feed can drive later.
 
 ## Covenants and the freeze
 

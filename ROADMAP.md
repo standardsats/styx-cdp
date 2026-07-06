@@ -99,11 +99,20 @@ deploy/ configs.
   now runs through the extracted `lifecycle` driver whose trace is the anchor: reindexing the
   smoke chain from genesis reproduces every step at its txid and converges to the tracked
   state; dust/fragments proven inert on node and off.
-- [ ] **R2 - quotes: styx-oracle + styx-watch::quotes.** The oracle daemon publishes an
-  addressable Nostr event (d = height) per block plus a debug/admin HTTP surface (/health,
-  /quote, POST /price); the quote client verifies each BIP340 signature against the config's
-  oracle keys before assembling a 3-of-5 OracleTick. Integration test through the embedded
-  LocalRelay.
+- [x] **R2 - quotes: styx-oracle + styx-watch::quotes.** The wire quote is JSON {slot,
+  height, price, backing_k, sig} where sig is the protocol BIP340 signature over the tick
+  digest - the Nostr key is carriage only, so a quote is trusted for what it proves, not for
+  who relayed it. QuoteBook verifies against the covenant oracle keys BEFORE caching (foreign
+  signature / transplanted height / out-of-range slot / stale / future / covenant-invalid
+  zero price all rejected trace-free - one byzantine oracle must not jam assembly) and
+  assembles 3-of-5 ticks grouped by backing_k; an assembled tick finalizes a POKE
+  at the prune tier, closing the loop. Transport sits behind QuoteTransport: an in-memory hub
+  for tests and the Nostr impl (addressable kind 33321, d = height so relays keep the latest
+  quote per (oracle, height), explicit created_at bump for replacement, NIP-40 expiry as a GC
+  hint), proven against the embedded LocalRelay: five publishers, live stream + stored-events
+  fetch, replacement not accumulation, stranger authors dropped. styx-oracle: per-slot config,
+  block loop (one quote per new tip), axum admin (/health, /quote?height, POST /price with a
+  zero-price refusal) - the same router and loop the tests drive.
 - [ ] **R3 - styx-wallet (CLI).** open/repay/draw/refresh/close/redeem/status/fund over the
   builder pipeline (owner_sign + sign_funding + finalize_pset). Owner wallet tracked by the
   indexer. On-node CLI cycle against a regtest node with a mock quote source.
@@ -116,5 +125,7 @@ deploy/ configs.
   the cascade), and a same-host swarm rehearsal.
 
 Out of scope for this phase: FROST / multisig of the oracle protocol key, a real price feed
-(behind a PriceSource trait), confidential change outputs, and automated redeem arbitrage by
-the keeper (the decision ladder leaves room to add it).
+(behind a PriceSource trait), authentication of the oracle admin surface (it signs on demand
+and moves the price, so it binds loopback / trusted LAN until then), confidential change
+outputs, and automated redeem arbitrage by the keeper (the decision ladder leaves room to
+add it).

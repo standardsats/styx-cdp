@@ -22,6 +22,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
+# The role-daemon runtime. nostr-sdk is pinned exactly: 0.45 is an alpha with API churn, and
+# the relay-builder (the LocalRelay test fixture) must match it version-for-version.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+axum = "0.8"
+nostr-sdk = "=0.44.1"
+nostr-relay-builder = "=0.44.1"
+tower = "0.5"
 
 [profile.test]
 # Simplicity compilation and pruning in the prune-level tier are CPU-bound; opt-level 1 keeps

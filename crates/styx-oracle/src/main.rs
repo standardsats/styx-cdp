@@ -1,0 +1,79 @@
+//! styx-oracle: one quorum slot as a daemon. Signs the configured price at every new block
+//! of its own elementsd, publishes the quote to the Nostr relays, and serves the
+//! debug/admin HTTP surface.
+
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use clap::Parser;
+use styx_core::elements::secp256k1_zkp as zkp;
+use styx_core::oracle::OracleSlot;
+use styx_core::units::Price;
+use styx_node::client::Node;
+use styx_watch::nostr::NostrQuotes;
+
+use styx_oracle::config::OracleConfig;
+use styx_oracle::http;
+use styx_oracle::service::{publish_blocks, OracleState, NODE_DOWN_FATAL};
+
+#[derive(Parser)]
+#[command(about = "STYX v1 oracle daemon")]
+struct Args {
+    /// Path to the oracle's TOML config.
+    #[arg(long)]
+    config: PathBuf,
+}
+
+fn parse_protocol_key(hex: &str) -> Result<zkp::Keypair, String> {
+    let mut sk = [0u8; 32];
+    if hex.len() != 64 {
+        return Err("protocol_seckey must be 32 bytes of hex".into());
+    }
+    for (i, byte) in sk.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|_| "protocol_seckey: bad hex".to_string())?;
+    }
+    zkp::Keypair::from_seckey_slice(styx_core::secp(), &sk).map_err(|e| e.to_string())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let cfg = OracleConfig::load(&args.config)?;
+    let slot = OracleSlot::new(cfg.slot).map_err(|e| e.to_string())?;
+    let keypair = parse_protocol_key(&cfg.protocol_seckey)?;
+    let nostr_keys = nostr_sdk::Keys::parse(&cfg.nostr_seckey)?;
+
+    let state = Arc::new(OracleState::new(slot, keypair, Price::new(cfg.price_usd)));
+    let node = Node::from_url(&cfg.rpc_url, cfg.auth()?)?;
+    let mut transport = NostrQuotes::publisher(&cfg.relays, nostr_keys).await?;
+
+    let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
+    println!(
+        "styx-oracle slot {} up: admin http://{} price {} poll {}ms",
+        cfg.slot, cfg.listen, cfg.price_usd, cfg.poll_ms
+    );
+
+    let admin = axum::serve(listener, http::router(state.clone()));
+    let node = Arc::new(node);
+    let height = move || node.height();
+    let blocks = publish_blocks(
+        state,
+        &mut transport,
+        height,
+        Duration::from_millis(cfg.poll_ms),
+        NODE_DOWN_FATAL,
+    );
+
+    tokio::select! {
+        r = admin => r.map_err(Into::into),
+        r = blocks => r.map_err(Into::into),
+        _ = tokio::signal::ctrl_c() => {
+            println!("shutting down");
+            Ok(())
+        }
+    }
+}

@@ -26,7 +26,7 @@ in its dependency tree.
 
 The bottom three crates are the frozen v1 implementation (M0-M11). The role-daemon phase
 (R0-R5, see ROADMAP.md) adds `styx-watch` (the shared daemon base: the `styxnet.toml`
-deployment config, and - landing in R1/R2 - the chain indexer and the Nostr quote client) and
+deployment config, the chain indexer, and - landing in R2 - the Nostr quote client) and
 the four binaries. Tokio / axum / reqwest / nostr-sdk / clap live only in these new crates, so
 the core stays minimal.
 
@@ -48,8 +48,13 @@ the core stays minimal.
   Conflict/Rejected split (every mint serializes through the one issuer UTXO), the deployment
   ceremony (`ceremony.rs`, reused by the regtest harness and styx-deploy), and the on-node e2e
   acceptance suite.
-- **styx-watch** - the shared base of the role daemons: the `styxnet.toml` config type now,
-  the chain indexer and the Nostr quote client in R1/R2.
+- **styx-watch** - the shared base of the role daemons: the `styxnet.toml` config type; the
+  chain indexer (`index.rs`) that reads the whole protocol state machine off transaction
+  layouts - covenant-pinned token successor outputs, pot deltas, and committed heights
+  recovered by spk-matched scans (nLockTime only bounds them from above) - with candidate
+  owner keys as the wallet's filter seam (a vault with no matching candidate is tracked
+  opaque, an unrecognizable spend of a known vault is marked lost); the atomic JSON snapshot
+  (`snapshot.rs`); the RPC catch-up scan (`sync.rs`). The Nostr quote client lands in R2.
 
 ## Covenants and the freeze
 

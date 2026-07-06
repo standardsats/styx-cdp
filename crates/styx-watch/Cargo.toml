@@ -7,6 +7,9 @@ description = "STYX v1 daemon base: shared network config, chain indexer, oracle
 
 [dependencies]
 styx-core = { path = "../styx-core" }
+styx-pset = { path = "../styx-pset" }
+styx-node = { path = "../styx-node" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }

@@ -82,11 +82,23 @@ deploy/ configs.
   moved to ceremony.rs. styx-deploy: `run` executes the ceremony against a live node and fills
   styxnet.toml; `verify` recompiles the artifacts and locates the singletons on chain - the
   compiled-pins-vs-published-artifacts check.
-- [ ] **R1 - styx-watch: the chain indexer.** Infer every vault transition from transaction
-  layout (no witness decoding): OPEN/DRAW births, REPAY/REFRESH/LIQUIDATE/REDEEM transitions,
-  CLOSE/FULLIQ/BADDEBT removals; nLockTime gives last_height for free; a computed successor spk
-  mismatch marks a vault lost. JSON snapshot file, catch-up scan. Anchor test: reindex the e2e
-  smoke chain from genesis and match the smoke's tracked state.
+- [x] **R1 - styx-watch: the chain indexer.** Every transition inferred from transaction
+  layout (no witness decoding): ceremony births, issuer ops by the covenant-pinned token
+  successor output (0 POKE / 4 OPEN / 3 DRAW and ATTEST, split by the reserve co-spend),
+  vault ops by input signature; builder-conventional positions are verified on top and any
+  mismatch degrades to an Anomaly, never a false record. Committed heights (anchor, vault
+  last_height) are recovered by a bounded descending scan against the successor's derived spk
+  - nLockTime is only their upper bound, check_lock_height being a lower bound on the tx
+  (the one undecidable spot, an opaque vault's REFRESH, records an upper bound).
+  The owner is the one field a layout cannot yield, so the indexer takes
+  candidate owner keys (the wallet's filter seam) and verifies the derived vault spk against
+  the actual output - no match tracks the vault as opaque (bookkept, not builder-consumable);
+  a successor-spk mismatch or an unrecognizable spend marks it lost. Partial LIQUIDATE and
+  REDEEM are layout-isomorphic (both keep last_height) and are reported as one Deleveraged
+  event. JSON snapshot (atomic tmp+rename), catch-up scan with a reorg check. The e2e smoke
+  now runs through the extracted `lifecycle` driver whose trace is the anchor: reindexing the
+  smoke chain from genesis reproduces every step at its txid and converges to the tracked
+  state; dust/fragments proven inert on node and off.
 - [ ] **R2 - quotes: styx-oracle + styx-watch::quotes.** The oracle daemon publishes an
   addressable Nostr event (d = height) per block plus a debug/admin HTTP surface (/health,
   /quote, POST /price); the quote client verifies each BIP340 signature against the config's

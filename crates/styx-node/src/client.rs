@@ -9,7 +9,7 @@ use elementsd::bitcoincore_rpc::{Client, RpcApi};
 use elementsd::ElementsD;
 use styx_core::elements::encode::{deserialize, serialize_hex};
 use styx_core::elements::hex::FromHex;
-use styx_core::elements::{Address, AssetId, BlockHash, OutPoint, Script, Transaction, Txid};
+use styx_core::elements::{Address, AssetId, Block, BlockHash, OutPoint, Script, Transaction, Txid};
 use styx_core::units::Sats;
 
 use crate::{BroadcastError, NodeError};
@@ -63,9 +63,22 @@ impl Node {
     }
 
     pub fn genesis(&self) -> Result<BlockHash, NodeError> {
-        let s = self.rpc("getblockhash", &[0.into()])?;
+        self.block_hash(0)
+    }
+
+    pub fn block_hash(&self, height: u32) -> Result<BlockHash, NodeError> {
+        let s = self.rpc("getblockhash", &[height.into()])?;
         BlockHash::from_str(s.as_str().unwrap_or(""))
             .map_err(|_| NodeError::Shape { context: "getblockhash" })
+    }
+
+    /// The full block, witnesses included (the indexer walks these).
+    pub fn block(&self, hash: BlockHash) -> Result<Block, NodeError> {
+        let res = self.rpc("getblock", &[hash.to_string().into(), 0.into()])?;
+        let hex = res.as_str().ok_or(NodeError::Shape { context: "getblock" })?;
+        let bytes =
+            Vec::<u8>::from_hex(hex).map_err(|_| NodeError::Shape { context: "getblock hex" })?;
+        deserialize(&bytes).map_err(|_| NodeError::Shape { context: "getblock block" })
     }
 
     pub fn mine(&self) -> Result<(), NodeError> {

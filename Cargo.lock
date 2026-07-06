@@ -1071,7 +1071,10 @@ name = "styx-watch"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "styx-core",
+ "styx-node",
+ "styx-pset",
  "thiserror",
  "toml",
 ]

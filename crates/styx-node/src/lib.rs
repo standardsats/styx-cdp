@@ -9,7 +9,10 @@
 
 pub mod ceremony;
 pub mod client;
-// The regtest ceremony is test-harness code and panics on failure by design.
+// The lifecycle driver and the regtest ceremony are test-harness code and panic on failure
+// by design.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+pub mod lifecycle;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub mod regtest;
 pub mod scan;

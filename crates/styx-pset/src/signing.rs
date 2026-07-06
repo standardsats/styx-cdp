@@ -92,7 +92,9 @@ pub fn apply_owner_sig(ctx: &Ctx, plan: &mut TxPlan, sig_hex: &str) -> Result<()
 }
 
 fn decode_64(s: &str) -> Result<[u8; 64], SigningError> {
-    if s.len() != 128 {
+    // ASCII first: a 128-BYTE string with multibyte UTF-8 would slice on a non-char
+    // boundary below and panic; hex is ascii by definition.
+    if !s.is_ascii() || s.len() != 128 {
         return Err(SigningError::SigEncoding("expected 128 hex chars"));
     }
     let mut out = [0u8; 64];

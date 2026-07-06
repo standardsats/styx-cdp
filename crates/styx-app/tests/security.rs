@@ -24,9 +24,21 @@ fn gated(g: Arc<Gate>) -> Router {
 }
 
 fn request(host: &str, origin: Option<&str>, token: Option<&str>) -> Request<axum::body::Body> {
+    req_with(host, origin, token, None)
+}
+
+fn req_with(
+    host: &str,
+    origin: Option<&str>,
+    token: Option<&str>,
+    fetch_site: Option<&str>,
+) -> Request<axum::body::Body> {
     let mut b = Request::builder().uri("/ping").header("host", host);
     if let Some(o) = origin {
         b = b.header("origin", o);
+    }
+    if let Some(fs) = fetch_site {
+        b = b.header("sec-fetch-site", fs);
     }
     if let Some(t) = token {
         b = b.header(TOKEN_HEADER, t);
@@ -255,4 +267,54 @@ funding_seckey = "{k}"
     assert_eq!(origins, vec!["http://umbrel.local:9780".to_string()]);
     // A garbage bind is still a config error.
     assert!(AppConfig::parse(&toml("[proxy]\nbind = \"not-an-address\"")).is_err());
+}
+
+#[tokio::test]
+async fn a_cross_site_fetch_is_forbidden_even_without_an_origin() {
+    // The token-theft shape: a hostile page does <script src=".../session.js">. That GET
+    // carries the right Host and NO Origin (so the Origin check waves it through), but the
+    // browser stamps it Sec-Fetch-Site: cross-site. It must be refused, or the token leaks.
+    let g = Arc::new(Gate::mint(v4()));
+    let token = g.token().to_string();
+    let app = gated(g);
+
+    let cross = app
+        .clone()
+        .oneshot(req_with("127.0.0.1:9780", None, Some(&token), Some("cross-site")))
+        .await
+        .unwrap();
+    assert_eq!(cross.status(), StatusCode::FORBIDDEN);
+
+    // same-origin (the real page's fetch) and none (a typed URL) pass; absent (curl) passes.
+    for site in ["same-origin", "none"] {
+        let ok = app
+            .clone()
+            .oneshot(req_with("127.0.0.1:9780", None, Some(&token), Some(site)))
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), StatusCode::OK, "sec-fetch-site {site}");
+    }
+}
+
+#[tokio::test]
+async fn a_non_loopback_bind_does_not_auto_trust_localhost() {
+    // On a proxy (non-loopback) bind the port is on a wider network; a `Host: localhost:port`
+    // from an attacker must NOT be trusted (it would otherwise be handed the token). Only the
+    // explicit allow_hosts count there.
+    use styx_app::auth::Gate;
+    let g = Gate::mint_proxied(
+        "0.0.0.0:9780".parse().unwrap(),
+        vec!["umbrel.local:9780".to_string()],
+        vec!["http://umbrel.local:9780".to_string()],
+    );
+    let token = g.token().to_string();
+    let app = gated(std::sync::Arc::new(g));
+
+    for host in ["localhost:9780", "0.0.0.0:9780", "127.0.0.1:9780"] {
+        let resp = app.clone().oneshot(request(host, None, Some(&token))).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "host {host} must not be trusted");
+    }
+    // The configured proxy host still works.
+    let ok = app.oneshot(request("umbrel.local:9780", None, Some(&token))).await.unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
 }

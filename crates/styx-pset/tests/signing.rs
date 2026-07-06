@@ -72,3 +72,15 @@ fn a_permissionless_op_has_no_owner_to_sign() {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+#[test]
+fn a_multibyte_signature_string_is_a_typed_error_not_a_panic() {
+    // A 128-BYTE (not 128-char) string with multibyte UTF-8 would slice on a non-char
+    // boundary and panic; it must be a clean SigEncoding error.
+    let d = TestDeploy::get();
+    let s = scenarios::close(d);
+    let mut plan = s.plan.clone();
+    let multibyte = "\u{00e9}".repeat(64); // 64 chars, 128 bytes, non-ascii
+    assert_eq!(multibyte.len(), 128);
+    assert!(matches!(apply_owner_sig(&d.ctx, &mut plan, &multibyte), Err(SigningError::SigEncoding(_))));
+}

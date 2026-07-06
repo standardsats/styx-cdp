@@ -605,14 +605,21 @@ async fn apply_signed(
         let w = wallet.lock().unwrap_or_else(|e| e.into_inner());
         styx_pset::signing::apply_owner_sig(&w.ctx, &mut plan, &req.owner_sig)
             .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-        let txid = w.finalize_broadcast(&plan).map_err(|e| {
-            // The signature was good but the broadcast failed: the chain moved under the
-            // exported plan (the vault was liquidated or spent). Drop it; re-export.
-            state.drop_pending(&req.txid);
-            ApiError::Stale(e.to_string())
-        })?;
-        state.drop_pending(&req.txid);
-        Ok(OpView { txid: txid.to_string(), vault: None })
+        match w.finalize_broadcast(&plan) {
+            Ok(txid) => {
+                state.drop_pending(&req.txid);
+                Ok(OpView { txid: txid.to_string(), vault: None })
+            }
+            // The chain moved under the exported plan (the vault was liquidated or spent):
+            // this plan can never land - drop it, 409, re-export.
+            Err(WalletError::Broadcast(styx_node::BroadcastError::Conflict(m))) => {
+                state.drop_pending(&req.txid);
+                Err(ApiError::Stale(m))
+            }
+            // A transient failure (the node is down): the signature is still good and the
+            // plan may yet apply - KEEP it pending, surface the error, let the caller retry.
+            Err(e) => Err(ApiError::from(e)),
+        }
     })
     .await
     .map_err(|e| ApiError::Internal(format!("apply task: {e}")))??;

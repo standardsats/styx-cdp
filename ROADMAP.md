@@ -285,7 +285,9 @@ explorer that cannot sign by construction.
   refusals. Acceptance on node: a vault opened through the API closes with an owner
   signature produced entirely off the app. The loopback rule has ONE sanctioned relaxation,
   and it is an explicit config seam, not a manifest fiat: an app.toml `[proxy]` section
-  (bind + allow_hosts, folded into the Host/Origin allowlist) for Umbrel/StartOS, default-
+  (bind + allow_hosts + allow_origins - the exact Host and Origin the platform sends,
+  scheme included, since Umbrel/Tor are http and only StartOS-LAN is https) for Umbrel/
+  StartOS, default-
   deny and negative-tested. Packaging is scaffolded and rev-tagged, scoped in PACKAGING.md:
   a Tauri shell that points a webview at the bundled app's loopback origin (no second
   frontend, a kill-on-drop child so no headless wallet survives the window, pinned

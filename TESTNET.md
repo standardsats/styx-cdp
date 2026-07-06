@@ -65,7 +65,7 @@ Get tL-BTC. Print your funding address and point a Liquid-testnet faucet (for ex
 one at liquidtestnet.com) DIRECTLY at it:
 
 ```bash
-# write ~/.styx/wallet.toml first (step 4a), then:
+# write ~/.styx/wallet.toml first (step 5a), then:
 $BIN/styx-wallet --config ~/.styx/wallet.toml address
 # funding address: tex1p...   <- give this to the faucet
 ```

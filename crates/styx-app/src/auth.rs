@@ -72,12 +72,16 @@ impl Gate {
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        Gate {
-            token,
-            hosts: vec![addr.to_string(), format!("localhost:{}", addr.port())],
-            proxy_hosts,
-            proxy_origins,
-        }
+        // `localhost:port` and the bound-address form are auto-trusted ONLY for a loopback
+        // bind. On a non-loopback (proxy) bind the port is on a wider network, and a
+        // `Host: localhost:port` from an attacker would otherwise pass and be handed the
+        // token - so a proxy deploy trusts nothing but its explicit allow_hosts.
+        let hosts = if addr.ip().is_loopback() {
+            vec![addr.to_string(), format!("localhost:{}", addr.port())]
+        } else {
+            Vec::new()
+        };
+        Gate { token, hosts, proxy_hosts, proxy_origins }
     }
 
     pub fn token(&self) -> &str {
@@ -101,11 +105,23 @@ impl Gate {
         self.proxy_origins.iter().any(|o| o == origin)
     }
 
-    /// The page-tier check: Host (anti-rebinding) and Origin only, no token. The served
-    /// page is where the browser LEARNS the token, so it cannot require one; a foreign
-    /// process on the same machine is outside this gate's threat model either way (it can
-    /// read the config file, which holds the keys themselves).
+    /// The page-tier check: Host (anti-rebinding), Origin, and `Sec-Fetch-Site` - no token.
+    /// The served page is where the browser LEARNS the token, so it cannot require one; a
+    /// foreign process on the same machine is outside this gate's threat model either way
+    /// (it can read the config file, which holds the keys themselves).
+    ///
+    /// The `Sec-Fetch-Site` check is what stops a hostile page from stealing the token with
+    /// a cross-origin `<script src=".../session.js">`: that request carries no Origin (so
+    /// the Origin check alone waves it through), but the browser stamps it
+    /// `Sec-Fetch-Site: cross-site`. We reject `cross-site` / `same-site` and accept only
+    /// `same-origin`, `none` (a typed URL / direct navigation), or its absence (curl and
+    /// other non-browsers, which the token still gates on `/api`).
     pub fn check_page(&self, headers: &HeaderMap) -> Result<(), GateError> {
+        if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+            if site == "cross-site" || site == "same-site" {
+                return Err(GateError::ForbiddenOrigin);
+            }
+        }
         let host = headers.get("host").and_then(|v| v.to_str().ok()).unwrap_or("");
         if !self.host_ok(host) {
             return Err(GateError::ForbiddenHost);

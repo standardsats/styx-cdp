@@ -95,11 +95,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) if e.is_node_down() => {
                 let since = *node_down_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= NODE_DOWN_FATAL {
-                    return Err(format!(
-                        "node unreachable for {}s: {e}",
-                        since.elapsed().as_secs()
-                    )
-                    .into());
+                    return Err(
+                        format!("node unreachable for {}s: {e}", since.elapsed().as_secs()).into()
+                    );
                 }
                 eprintln!("sync failed ({e}), node down {}s, retrying", since.elapsed().as_secs());
             }

@@ -217,7 +217,52 @@ public Liquid testnet, where strangers open vaults and liquidate each other.
   layers, proven with `nix build --rebuild`) with the per-host compose files in
   deploy/docker/.
 
+The testnet phase ships headless. The UI phase (U0-U3 below) gives users and keepers one
+local-first application. The form factor is deliberate: keys stay on the user's machine and
+the UI is served by the user's own binary from 127.0.0.1 (the Specter / RTL pattern the
+community trusts), never from a remote origin; the only hosted surface is a read-only
+explorer that cannot sign by construction.
+
+- [ ] **U0 - styx-app: the local API server.** A new bin crate over the existing libs (ops
+  stays runtime-free; ticks assemble at the binary boundary exactly as the CLI does): axum
+  serving a JSON API plus an SSE event stream (sync progress, keeper journal) for one
+  wallet session. The security invariants come first and are the fast tier: 127.0.0.1
+  bind only (a non-loopback listen is a refused config), a per-session token minted at
+  startup and required on every call, an Origin/Host allowlist (the DNS-rebinding /
+  drive-by class every local wallet gets probed with) - each with its negative test.
+  Keeper mode lives in the same API: start/stop the step loop in-process on the same
+  purse, opts from the config, the Performed feed, and Rejected surfacing as a sticky
+  alert that stops the loop - the exit-65 semantics become an API state, not a dead
+  process. Acceptance: the whole owner cycle driven through the HTTP API against a
+  regtest deployment, plus the keeper loop closing one partial liquidation through it.
+- [ ] **U1 - the app UI (wallet + keeper, one binary).** Static assets embedded in the
+  binary (the spec-site look: same self-hosted fonts, same theme), served same-origin;
+  a test walks the served HTML/JS and asserts no external URL - no CDN, no telemetry,
+  ever. Wallet tab: status, receive/fund, open sized by collateral_for (a CR slider),
+  repay / draw / refresh / close / redeem with the same typed refusals the CLI prints.
+  Keeper tab: the toggle, the opts, the live Performed journal, the ALERT banner.
+  htmx-grade interactivity over the U0 API and SSE - no SPA framework, no bundler.
+  Acceptance: a swarm variant drives an open and one keeper action through the served
+  endpoints (headless HTTP), and the U0 security negatives re-run against the full app.
+- [ ] **U2 - the public explorer (the one hosted surface).** Read-only protocol state over
+  the R1 indexer: pot / reserve / issuer, the vault table with CR bands at the latest
+  assembled tick, per-slot oracle health (feed age), the liquidation event feed. Zero
+  keys is a dependency-graph fact, not a policy: the explorer crate links
+  styx-watch/core/node only, so no signing code enters its closure (a compile-time
+  layering test, the M0 crate-graph rule again). Ships as explorer-image behind the same
+  Caddy; TESTNET.md sends curious readers here first, and the explorer's "open a vault"
+  call-to-action points back at the styx-app download. Acceptance: the explorer renders a
+  swarm chain's crash cascade correctly and survives a soak-length uptime run.
+- [ ] **U3 - packaging.** The same assets and API wrapped in Tauri for the desktop
+  single-binary feel (a shell, not a rewrite); Umbrel / Start9 packaging of styx-app +
+  elementsd (the node-runner audience is the keeper audience); per-platform release
+  binaries with the flake rev as the provenance tag, matching the container images. PSET
+  export in the UI (the vault_sighash / install_owner_sig seam from M6/M10) as the
+  external-signer story.
+
 Out of scope for these phases: FROST / multisig of the oracle protocol key, authentication
 of the oracle admin surface (it signs on demand and moves the price, so it binds loopback /
 trusted LAN until then), confidential change outputs, and automated redeem arbitrage by the
-keeper (the decision ladder leaves room to add it).
+keeper (the decision ladder leaves room to add it). For the UI phase: any hosted signing or
+key custody (the explorer is read-only by dependency-graph construction), browser-extension
+wallets, telemetry of any kind, and mobile.

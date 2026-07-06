@@ -1,0 +1,18 @@
+[package]
+name = "styx-wallet"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 owner wallet CLI: vault operations over the builder pipeline with key-path p2tr funding"
+
+[dependencies]
+styx-core = { path = "../styx-core" }
+styx-pset = { path = "../styx-pset" }
+styx-node = { path = "../styx-node" }
+styx-watch = { path = "../styx-watch" }
+serde = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+nostr-sdk = { workspace = true }

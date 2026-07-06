@@ -1960,6 +1960,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-wallet"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nostr-sdk",
+ "serde",
+ "styx-core",
+ "styx-node",
+ "styx-pset",
+ "styx-watch",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "styx-watch"
 version = "0.1.0"
 dependencies = [

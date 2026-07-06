@@ -22,7 +22,10 @@ use crate::ScanError;
 /// addresses, and an unfiltered scan would either report false fragmentation (pot, reserve)
 /// or hand a builder a griefer's outpoint instead of the token (issuer) - the prune tier
 /// would accept it against the claimed UTXO and the node would then reject.
-fn scan_spk(
+///
+/// Public: the wallet discovers its own key-path coins (L-BTC and OBOL at its funding spk)
+/// through the same scan. Confirmed UTXOs only - scantxoutset does not see the mempool.
+pub fn scan_spk(
     node: &Node,
     spk: &Script,
     asset: styx_core::elements::AssetId,

@@ -113,13 +113,29 @@ deploy/ configs.
   fetch, replacement not accumulation, stranger authors dropped. styx-oracle: per-slot config,
   block loop (one quote per new tip), axum admin (/health, /quote?height, POST /price with a
   zero-price refusal) - the same router and loop the tests drive.
-- [ ] **R3 - styx-wallet (CLI).** open/repay/draw/refresh/close/redeem/status/fund over the
-  builder pipeline (owner_sign + sign_funding + finalize_pset). Owner wallet tracked by the
-  indexer. On-node CLI cycle against a regtest node with a mock quote source.
+- [x] **R3 - styx-wallet (CLI).** The owner's wallet as a thin CLI over a tested library:
+  keygen/address/fund/status/open/repay/draw/refresh/close/redeem. One key-path p2tr script
+  (the funding key) holds every coin - L-BTC and OBOL principal/change alike - discovered by
+  confirmed-utxo scans and signed via the M10 PSET pipeline (sign_funding, SIGHASH_ALL); the
+  owner key never appears as an address, only inside vault commitments, and our vaults are
+  whatever the R1 indexer resolves to it (session = styxnet.toml + genesis cross-check +
+  snapshot). OPEN's frozen layout needs exact funding, so the wallet shapes an exact coin
+  with a self-spend and chains the open on it in the mempool. Ticks are injected at the lib
+  boundary; the binary assembles them from the relays (fetch at the tip, walking back to the
+  first quorum). The on-node acceptance runs the full owner cycle - fund, shaped open, repay,
+  draw, refresh, redeem, close - with real keys, ending with the pot at full supply, the
+  collateral back, and a fresh session from the snapshot agreeing state-for-state.
 - [ ] **R4 - styx-keeper.** A pure decide(vault, tick, config) -> Action ladder
   (bad-debt / full-liq / partial with plan_partial, property-tested against the builder) plus
   the watchtower duties (poke the issuer toward the tip, refresh dormant healthy vaults, M-2)
   and retry-on-conflict. On-host smoke: wallet opens, oracles cheapen, keeper liquidates.
+  Design decision to settle first - owner bytes for foreign vaults (liquidation needs the
+  full vault state, and layout inference cannot yield the owner by construction): candidate
+  A is a bit-granular sliding-window search of the OPEN transaction's issuer witness for a
+  32-byte word w with vault_spk(debt, w, last_height) == the vault's spk - trustless (the
+  address commitment judges, exactly like the wallet's candidate filter), no Simplicity
+  decoding, sub-second once per vault birth; candidate B restricts the keeper to owners
+  known from config. A no-match under A degrades to today's opaque tracking.
 - [ ] **R5 - multi-machine assembly.** nostr-rs-relay in the flake, per-role configs/units,
   SETUP.md (bring-up across 3-4 machines), a scenario script (POST /price crash -> observe
   the cascade), and a same-host swarm rehearsal.

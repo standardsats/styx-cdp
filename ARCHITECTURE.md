@@ -64,6 +64,12 @@ the core stays minimal.
   block of its own elementsd, publishes over Nostr, and serves the debug/admin HTTP surface
   (/health, /quote?height as the fallback channel, POST /price as the scenario lever). The
   price sits behind a `set_price` seam a real feed can drive later.
+- **styx-wallet** - the owner's CLI over a tested library. All funds live at one key-path
+  p2tr script (the funding key), signed through the PSET pipeline (SIGHASH_ALL); vault
+  ownership is the separate owner key, which never appears as an address - the wallet's
+  vaults are whatever its indexer sync resolves to it. OPEN's exact-funding requirement is
+  met by a shaping self-spend chained in the mempool; ticks come from the relays in the
+  binary and are injected at the library boundary in tests.
 
 ## Covenants and the freeze
 

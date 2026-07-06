@@ -1,0 +1,17 @@
+[Unit]
+Description=STYX keeper daemon
+After=elementsd.service
+Requires=elementsd.service
+
+[Service]
+User=styx
+ExecStart=/usr/local/bin/styx-keeper --config /etc/styx/keeper.toml
+Restart=on-failure
+RestartSec=5
+# Exit 65 is the Rejected invariant-break alert: the node refused what the prune tier
+# accepted. A restart would rebuild the same transaction and hit the same rejection every
+# RestartSec - that failure wants eyes, not retries. Ordinary crashes still restart.
+RestartPreventExitStatus=65
+
+[Install]
+WantedBy=multi-user.target

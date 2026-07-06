@@ -29,6 +29,10 @@
           pkgs.cargo-llvm-cov
           pkgs.gcc # the cc-wrapper rustc needs to link
           elementsd-simplicity
+          # The oracle quote relay (R5): one instance on the infra machine; the swarm
+          # rehearsal launches it locally.
+          pkgs.nostr-rs-relay
+          pkgs.curl # the scenario scripts drive the oracle admin endpoints
         ];
 
         # The e2e tier (styx-node tests) reads this to find the Simplicity-capable node.

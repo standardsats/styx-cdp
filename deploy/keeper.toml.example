@@ -1,0 +1,17 @@
+# The keeper daemon: a wallet-shaped purse plus the watchtower knobs. Fund it with L-BTC
+# for fees and OBOL for liquidations (`styx-wallet --config keeper.toml address` gives the
+# purse address; any wallet's `send` pays into it).
+
+styxnet = "/etc/styx/styxnet.toml"
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "REPLACE"
+snapshot = "/var/lib/styx/keeper-snapshot.json"
+owner_seckey = "REPLACE"
+funding_seckey = "REPLACE"
+
+# POKE when the issuer anchor lags the tip by more than this many blocks.
+poke_lag = 4
+# REFRESH healthy vaults whose ratchet lags by more than this many blocks.
+refresh_lag = 16
+poll_ms = 1000

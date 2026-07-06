@@ -22,9 +22,12 @@ use styx_oracle::service::{publish_blocks, OracleState, NODE_DOWN_FATAL};
 #[derive(Parser)]
 #[command(about = "STYX v1 oracle daemon")]
 struct Args {
-    /// Path to the oracle's TOML config.
+    /// Path to the oracle's TOML config (required to run; not needed for keygen).
     #[arg(long)]
-    config: PathBuf,
+    config: Option<PathBuf>,
+    /// Generate a fresh protocol + nostr keypair for a new oracle slot and exit.
+    #[arg(long)]
+    keygen: bool,
 }
 
 fn parse_protocol_key(hex: &str) -> Result<zkp::Keypair, String> {
@@ -39,10 +42,29 @@ fn parse_protocol_key(hex: &str) -> Result<zkp::Keypair, String> {
     zkp::Keypair::from_seckey_slice(styx_core::secp(), &sk).map_err(|e| e.to_string())
 }
 
+/// Print an oracle identity: the secrets in oracle-config form, the pubkeys in
+/// styxnet.toml form. OS entropy via the nostr key generator; both curves are secp256k1.
+fn keygen() -> Result<(), Box<dyn std::error::Error>> {
+    let protocol = nostr_sdk::Keys::generate();
+    let nostr = nostr_sdk::Keys::generate();
+    let kp = parse_protocol_key(&protocol.secret_key().to_secret_hex())?;
+    println!("# oracle config (secrets):");
+    println!("protocol_seckey = \"{}\"", protocol.secret_key().to_secret_hex());
+    println!("nostr_seckey = \"{}\"", nostr.secret_key().to_secret_hex());
+    println!("# styxnet.toml entry (public):");
+    println!("protocol_pk = \"{}\"", kp.x_only_public_key().0);
+    println!("nostr_pk = \"{}\"", nostr.public_key().to_hex());
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let cfg = OracleConfig::load(&args.config)?;
+    if args.keygen {
+        return keygen();
+    }
+    let config = args.config.ok_or("--config is required (or --keygen)")?;
+    let cfg = OracleConfig::load(&config)?;
     let slot = OracleSlot::new(cfg.slot).map_err(|e| e.to_string())?;
     let keypair = parse_protocol_key(&cfg.protocol_seckey)?;
     let nostr_keys = nostr_sdk::Keys::parse(&cfg.nostr_seckey)?;

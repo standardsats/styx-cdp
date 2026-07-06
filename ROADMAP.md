@@ -143,9 +143,21 @@ deploy/ configs.
   runs the escalation end to end: the wallet opens, the keeper resolves the foreign owner
   from the witness, pokes, refreshes, heals the $50k dip partially, closes the $35k crash
   as bad debt, and ends compensated with the pot at full supply.
-- [ ] **R5 - multi-machine assembly.** nostr-rs-relay in the flake, per-role configs/units,
-  SETUP.md (bring-up across 3-4 machines), a scenario script (POST /price crash -> observe
-  the cascade), and a same-host swarm rehearsal.
+- [x] **R5 - multi-machine assembly.** nostr-rs-relay in the flake; deploy/ carries the
+  per-role config templates (oracle / wallet / keeper / relay / styxnet skeleton) and
+  systemd units; SETUP.md walks the 3-4 machine bring-up (consensus-block discipline,
+  genesis cross-checks, firewall posture, per-role steps); scenario-crash.sh moves every
+  oracle's price through the admin endpoints. The acceptance is deploy/swarm.sh: the whole
+  topology as real processes on one host - styxnet elementsd + block loop, nostr-rs-relay,
+  five freshly-keyed oracle daemons, the ceremony, a funded wallet opening a vault and
+  handing the principal to the keeper, then the crash cascade ($50k partial heal, $35k
+  bad-debt closure, pot back at full supply), exit 0 only on the full postcondition. The
+  rehearsal surfaced and fixed a real liveness bug: a daemon polling faster than blocks
+  confirm rebuilt its own liquidation and died on "already in block chain" - broadcast is
+  now idempotent (an already-known tx is our txid, not a rejection) and the keeper keeps an
+  acted-list so a vault with a pending spend sits out until it confirms (bounded, so an
+  evicted transaction retries). New seams the swarm needed: `styx-wallet send` (OBOL/L-BTC
+  to any address; the keeper smoke now covers it on node) and `styx-oracle --keygen`.
 
 Out of scope for this phase: FROST / multisig of the oracle protocol key, a real price feed
 (behind a PriceSource trait), authentication of the oracle admin surface (it signs on demand

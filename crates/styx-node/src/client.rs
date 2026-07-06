@@ -94,7 +94,14 @@ impl Node {
     }
 
     /// Broadcast; a missing-or-spent input surfaces as `Conflict` (the issuer-singleton
-    /// contention mode: re-scan, rebuild, retry), everything else as `Rejected`.
+    /// contention mode: re-scan, rebuild, retry), everything else as `Rejected`. Broadcast
+    /// is idempotent: a deterministic rebuild of a transaction the network already has (in
+    /// the mempool or a block) is our own tx by txid, not a failure - daemons polling
+    /// faster than blocks confirm hit this constantly.
+    ///
+    /// Both classifications match on node error strings and are therefore calibrated
+    /// against the pinned elementsd by the on-node e2e (the conflict/idempotency test);
+    /// re-run that suite on any node bump before trusting these branches.
     pub fn send(&self, tx: &Transaction) -> Result<Txid, BroadcastError> {
         match self.rpc("sendrawtransaction", &[serialize_hex(tx).into()]) {
             Ok(v) => Txid::from_str(v.as_str().unwrap_or(""))
@@ -102,6 +109,11 @@ impl Node {
             Err(NodeError::Rpc { message, .. }) => {
                 if message.contains("missingorspent") || message.contains("conflict") {
                     Err(BroadcastError::Conflict(message))
+                } else if message.contains("already in block chain")
+                    || message.contains("already known")
+                    || message.contains("txn-already-in-mempool")
+                {
+                    Ok(tx.txid())
                 } else {
                     Err(BroadcastError::Rejected(message))
                 }

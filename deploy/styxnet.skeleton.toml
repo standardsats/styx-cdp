@@ -1,0 +1,41 @@
+# The operator's skeleton of the shared deployment artifact. Fill the oracle set (one entry
+# per slot, keys from `styx-oracle --keygen` on each oracle machine) and the relay list,
+# then run `styx-deploy run` on the infra machine: it executes the ceremony and completes
+# the chain-derived sections (genesis, assets, protocol). Distribute the completed file to
+# every machine.
+
+[network]
+chain = "styxnet"
+
+[[oracles]]
+slot = 0
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://10.0.0.11:9700"
+
+[[oracles]]
+slot = 1
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://10.0.0.12:9700"
+
+[[oracles]]
+slot = 2
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://10.0.0.13:9700"
+
+[[oracles]]
+slot = 3
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://10.0.0.14:9700"
+
+[[oracles]]
+slot = 4
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://10.0.0.15:9700"
+
+[nostr]
+relays = ["ws://10.0.0.10:7877"]

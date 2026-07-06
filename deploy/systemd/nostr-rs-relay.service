@@ -1,0 +1,14 @@
+# The oracle quote relay, infra machine.
+[Unit]
+Description=nostr-rs-relay (styxnet quotes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=styx
+ExecStart=/usr/local/bin/nostr-rs-relay --config /etc/styx/nostr-relay.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

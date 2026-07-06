@@ -1,0 +1,10 @@
+# The owner wallet. Keys from `styx-wallet keygen`; the funding address (`styx-wallet
+# address`) receives coins, the owner key never appears on chain.
+
+styxnet = "/etc/styx/styxnet.toml"
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "REPLACE"
+snapshot = "/var/lib/styx/wallet-snapshot.json"
+owner_seckey = "REPLACE"
+funding_seckey = "REPLACE"

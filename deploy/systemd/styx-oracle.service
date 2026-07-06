@@ -1,0 +1,13 @@
+[Unit]
+Description=STYX oracle daemon
+After=elementsd.service
+Requires=elementsd.service
+
+[Service]
+User=styx
+ExecStart=/usr/local/bin/styx-oracle --config /etc/styx/oracle.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

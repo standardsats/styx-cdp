@@ -97,4 +97,8 @@ fn issuer_respend_is_classified_as_conflict() {
         Err(BroadcastError::Conflict(_)) => {}
         other => panic!("expected Conflict, got {other:?}"),
     }
+    // Broadcast is idempotent: re-sending a transaction the chain already has is our own
+    // txid, not a rejection (daemons polling faster than blocks confirm rebuild
+    // deterministically and hit this constantly).
+    assert_eq!(dep.node.send(&first).expect("idempotent"), first.txid());
 }

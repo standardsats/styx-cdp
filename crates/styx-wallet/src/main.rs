@@ -85,6 +85,16 @@ enum Cmd {
         #[arg(long)]
         x: u64,
     },
+    /// Pay OBOL (or, with --lbtc, sats) to an address.
+    Send {
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        amount: u64,
+        /// Send L-BTC instead of OBOL.
+        #[arg(long)]
+        lbtc: bool,
+    },
 }
 
 fn parse_outpoint(s: &str) -> Result<OutPoint, String> {
@@ -245,6 +255,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let tick = assemble_tick(&net, &wallet.node, &wallet).await?;
             let report = wallet.redeem(vault_arg(&vault)?, Obol::new(x), &tick)?;
             print_report("redeem", &report);
+        }
+        Cmd::Send { to, amount, lbtc } => {
+            let dest = styx_core::elements::Address::from_str(&to)
+                .map_err(|e| format!("--to: {e}"))?
+                .script_pubkey();
+            let txid = if lbtc {
+                wallet.send_lbtc(dest, Sats::new(amount))?
+            } else {
+                wallet.send_obol(dest, Obol::new(amount))?
+            };
+            println!("send: broadcast {txid}");
         }
     }
     Ok(())

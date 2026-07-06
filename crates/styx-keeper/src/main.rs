@@ -56,8 +56,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match keeper.step(&tick) {
                 Ok(Some(done)) => println!("performed: {done:?}"),
                 Ok(None) => {}
-                // A Rejected alert means a builder invariant broke: stop rather than spin.
-                Err(e @ KeeperError::Rejected { .. }) => return Err(e.into()),
+                // A Rejected alert means a builder invariant broke: stop rather than spin,
+                // with the exit code the systemd unit refuses to restart.
+                Err(e @ KeeperError::Rejected { .. }) => {
+                    eprintln!("{e}");
+                    std::process::exit(styx_keeper::keeper::REJECTED_EXIT);
+                }
                 Err(e) => eprintln!("step failed ({e}), continuing"),
             }
         }

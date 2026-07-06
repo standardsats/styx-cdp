@@ -1,0 +1,13 @@
+# nostr-rs-relay for the oracle quotes: one instance on the infra machine. Addressable
+# events (the quote kind) and NIP-40 expiration are supported natively.
+
+[info]
+relay_url = "ws://10.0.0.10:7877"
+name = "styxnet relay"
+
+[database]
+data_directory = "/var/lib/nostr-rs-relay"
+
+[network]
+address = "0.0.0.0"
+port = 7877

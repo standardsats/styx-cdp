@@ -1,0 +1,14 @@
+# The chain node, producer and follower alike (the datadir's elements.conf decides which).
+[Unit]
+Description=Elements node (styxnet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=styx
+ExecStart=/usr/local/bin/elementsd -datadir=/var/lib/styxnet
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

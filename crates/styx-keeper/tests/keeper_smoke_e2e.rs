@@ -12,10 +12,8 @@ use styx_core::oracle::{OracleSlot, TickPayload};
 use styx_core::units::{BlockHeight, Obol, Price, RatioK, Sats};
 use styx_keeper::keeper::{Keeper, KeeperOpts, Performed};
 use styx_node::regtest::{deploy, Deployment, SUPPLY};
-use styx_pset::layout::{claimed, fee_out, txin, txout};
-use styx_pset::plan::TxPlan;
 use styx_wallet::config::WalletConfig;
-use styx_wallet::wallet::{Wallet, FEE};
+use styx_wallet::wallet::Wallet;
 use styx_watch::quotes::WireQuote;
 use styx_watch::transport::{MockHub, QuoteTransport};
 
@@ -133,32 +131,9 @@ fn wallet_opens_oracles_cheapen_keeper_liquidates() {
         );
         keeper.purse.fund(5_000_000).expect("keeper fee funds");
 
-        // The wallet hands its 4M OBOL principal to the keeper (the market, abridged).
-        let (obol_op, obol_val) = wallet.obol_coins().unwrap()[0];
-        let (fee_op, fee_val) =
-            styx_wallet::wallet::Wallet::select_at_least(&wallet.lbtc_coins().unwrap(), FEE.raw() + 1)
-                .unwrap();
-        let spk_w = wallet.funding_spk();
-        let spk_k = keeper.purse.funding_spk();
-        let tx = styx_core::elements::Transaction {
-            version: 2,
-            lock_time: styx_core::elements::LockTime::ZERO,
-            input: vec![txin(obol_op), txin(fee_op)],
-            output: vec![
-                txout(obol_val, spk_k.clone(), dep.ctx.params.obol),
-                txout(fee_val - FEE.raw(), spk_w.clone(), dep.ctx.params.policy),
-                fee_out(FEE, dep.ctx.params.policy),
-            ],
-        };
-        let plan = TxPlan {
-            tx,
-            in_utxos: vec![
-                claimed(obol_val, spk_w.clone(), dep.ctx.params.obol),
-                claimed(fee_val, spk_w.clone(), dep.ctx.params.policy),
-            ],
-            slots: vec![],
-        };
-        wallet.sign_and_broadcast(&plan).expect("obol transfer");
+        // The wallet hands its 4M OBOL principal to the keeper (the market, abridged) -
+        // through the CLI-facing send op.
+        wallet.send_obol(keeper.purse.funding_spk(), Obol::new(4_000_000)).expect("obol transfer");
         dep.node.mine().unwrap();
 
         // The keeper sees the foreign vault with a RESOLVED owner: the witness scan, not a

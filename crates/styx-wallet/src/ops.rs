@@ -231,4 +231,80 @@ impl Wallet {
         let txid = self.sign_and_broadcast(&built.plan)?;
         Ok(OpReport { txid, vault: Some(built.expected.vault) })
     }
+
+    /// Pay `amount` OBOL to an arbitrary script (a keeper's inventory, another wallet).
+    /// The fee comes from an L-BTC coin; both changes return to the funding spk.
+    pub fn send_obol(
+        &mut self,
+        dest: styx_core::elements::Script,
+        amount: Obol,
+    ) -> Result<Txid, WalletError> {
+        use styx_pset::layout::{claimed, fee_out, txin, txout};
+        use styx_pset::plan::TxPlan;
+
+        let (payer_op, payer_val) = self.ensure_obol(amount.raw())?;
+        let (fee_op, fee_val) = self.pick_lbtc(FEE.raw() + 1)?;
+        let ours = self.funding_spk();
+        let mut output = vec![txout(amount.raw(), dest, self.ctx.params.obol)];
+        if payer_val > amount.raw() {
+            output.push(txout(payer_val - amount.raw(), ours.clone(), self.ctx.params.obol));
+        }
+        let (change, fee) = crate::wallet::split_change(fee_val - FEE.raw());
+        if let Some(c) = change {
+            output.push(txout(c, ours.clone(), self.ctx.params.policy));
+        }
+        output.push(fee_out(fee, self.ctx.params.policy));
+        let plan = TxPlan {
+            tx: styx_core::elements::Transaction {
+                version: 2,
+                lock_time: styx_core::elements::LockTime::ZERO,
+                input: vec![txin(payer_op), txin(fee_op)],
+                output,
+            },
+            in_utxos: vec![
+                claimed(payer_val, ours.clone(), self.ctx.params.obol),
+                claimed(fee_val, ours, self.ctx.params.policy),
+            ],
+            slots: vec![],
+        };
+        self.sign_and_broadcast(&plan)
+    }
+
+    /// Pay `amount` sats to an arbitrary script.
+    pub fn send_lbtc(
+        &mut self,
+        dest: styx_core::elements::Script,
+        amount: Sats,
+    ) -> Result<Txid, WalletError> {
+        use styx_pset::layout::{claimed, fee_out, txin, txout};
+        use styx_pset::plan::TxPlan;
+
+        let coins = self.lbtc_coins()?;
+        let need = amount.raw() + FEE.raw();
+        let have: u64 = coins.iter().map(|(_, v)| *v).sum();
+        let taken = Wallet::select_accumulate(&coins, need)
+            .ok_or(WalletError::InsufficientLbtc { need, have })?;
+        let sum: u64 = taken.iter().map(|(_, v)| *v).sum();
+        let ours = self.funding_spk();
+        let mut output = vec![txout(amount.raw(), dest, self.ctx.params.policy)];
+        let (change, fee) = crate::wallet::split_change(sum - need);
+        if let Some(c) = change {
+            output.push(txout(c, ours.clone(), self.ctx.params.policy));
+        }
+        output.push(fee_out(fee, self.ctx.params.policy));
+        let plan = TxPlan {
+            tx: styx_core::elements::Transaction {
+                version: 2,
+                lock_time: styx_core::elements::LockTime::ZERO,
+                input: taken.iter().map(|(op, _)| txin(*op)).collect(),
+                output,
+            },
+            in_utxos: taken
+                .iter()
+                .map(|(_, v)| claimed(*v, ours.clone(), self.ctx.params.policy))
+                .collect(),
+            slots: vec![],
+        };
+        self.sign_and_broadcast(&plan)
+    }
 }

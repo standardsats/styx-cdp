@@ -1,0 +1,19 @@
+# One oracle daemon = one quorum slot. Secrets from `styx-oracle --keygen` (the printed
+# public halves go into styxnet.toml). Inline hex is the private-network phase's tradeoff;
+# treat the file as a secret (chmod 600).
+
+slot = 0
+protocol_seckey = "REPLACE"
+nostr_seckey = "REPLACE"
+relays = ["ws://10.0.0.10:7877"]
+
+# This machine's own elementsd (a follower).
+rpc_url = "http://127.0.0.1:18884"
+rpc_user = "styx"
+rpc_password = "REPLACE"
+
+# The debug/admin surface signs quotes on demand and moves the price: bind loopback or a
+# trusted LAN interface only.
+listen = "0.0.0.0:9700"
+price_usd = 120000
+poll_ms = 500

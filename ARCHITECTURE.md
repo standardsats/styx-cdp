@@ -26,9 +26,10 @@ in its dependency tree.
 
 The bottom three crates are the frozen v1 implementation (M0-M11). The role-daemon phase
 (R0-R5, see ROADMAP.md) adds `styx-watch` (the shared daemon base: the `styxnet.toml`
-deployment config, the chain indexer, and - landing in R2 - the Nostr quote client) and
-the four binaries. Tokio / axum / reqwest / nostr-sdk / clap live only in these new crates, so
-the core stays minimal.
+deployment config, the chain indexer, the Nostr quote client) and the four binaries.
+Tokio / axum / nostr-sdk / clap live only in these new crates, so the core stays minimal.
+The multi-machine bring-up is SETUP.md + the deploy/ templates; deploy/swarm.sh rehearses
+the whole topology as local processes and drives the price-crash cascade end to end.
 
 - **styx-core** - everything deterministic and IO-free. Unit newtypes (`Sats`, `Obol`, `Price`,
   `RatioK`, `BlockHeight`) with checked math; the CR formula `coll_at_cr` (exact truncation

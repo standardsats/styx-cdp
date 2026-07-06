@@ -1,0 +1,16 @@
+# Block production, infra machine only: an operational role, not consensus (any node could
+# produce; exactly one should).
+[Unit]
+Description=styxnet block production
+After=elementsd.service
+Requires=elementsd.service
+
+[Service]
+User=styx
+Environment=ELEMENTS_CLI=/usr/local/bin/elements-cli
+ExecStart=/usr/local/bin/produce-blocks.sh /var/lib/styxnet 10
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

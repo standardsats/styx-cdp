@@ -87,18 +87,34 @@ pub enum KeeperError {
     ConflictExhausted { what: &'static str, attempts: u32 },
 }
 
+/// The exit code for a `Rejected` invariant break. Distinct from ordinary failures so the
+/// service manager can be told NOT to restart it (`RestartPreventExitStatus=` in the
+/// systemd unit): a restarted keeper would resync, reach the same decision, rebuild the
+/// same transaction, and hit the same rejection every few seconds - an alert loop instead
+/// of the intended full stop.
+pub const REJECTED_EXIT: i32 = 65;
+
 const CONFLICT_ATTEMPTS: u32 = 3;
+
+/// How many blocks an acted-on vault stays off limits while its spend awaits a block.
+/// Normally the spend confirms with the next block and the outpoint leaves the index; if
+/// the transaction fell out of the mempool instead, the keeper retries after this many.
+const ACTED_RETRY_BLOCKS: u32 = 6;
 
 pub struct Keeper {
     pub purse: Wallet,
     pub book: QuoteBook,
     pub opts: KeeperOpts,
+    /// Broadcast-but-unconfirmed actions: spent vault outpoint -> the height acted at.
+    /// Polling faster than blocks confirm must not re-act on the same vault: the rebuild
+    /// either duplicates the transaction or self-conflicts in the mempool.
+    acted: std::collections::BTreeMap<OutPoint, u32>,
 }
 
 impl Keeper {
     pub fn new(purse: Wallet, opts: KeeperOpts) -> Self {
         let book = QuoteBook::new(purse.ctx.params.oracle_pks);
-        Keeper { purse, book, opts }
+        Keeper { purse, book, opts, acted: std::collections::BTreeMap::new() }
     }
 
     /// Feed one incoming quote into the book (verification inside; rejects are dropped).
@@ -125,9 +141,17 @@ impl Keeper {
     }
 
     /// One watchtower pass: sync, decide over every known vault, execute the single most
-    /// urgent action (see the module doc for why one).
+    /// urgent action (see the module doc for why one). Vaults with a pending broadcast
+    /// (`acted`) sit out until their spend confirms or goes stale.
     pub fn step(&mut self, tick: &OracleTick) -> Result<Option<Performed>, KeeperError> {
         self.purse.sync()?;
+        let height = self.purse.state.height;
+        // An acted-on outpoint that left the index confirmed; one that lingered past the
+        // retry window is fair game again (the broadcast evidently went nowhere).
+        let vaults_now = &self.purse.state.vaults;
+        self.acted.retain(|op, at| {
+            vaults_now.contains_key(op) && height < at.saturating_add(ACTED_RETRY_BLOCKS)
+        });
 
         // Liquidations, most severe first. Vaults with unresolved owners cannot be built
         // against (their owner bytes never surfaced); the indexer keeps them opaque.
@@ -139,6 +163,7 @@ impl Keeper {
         };
         let anchor = self.purse.protocol()?.issuer.state.last_mint_height;
         let mut vaults = self.known_vaults();
+        vaults.retain(|v| !self.acted.contains_key(&v.outpoint));
         vaults.sort_by_key(|v| v.outpoint); // deterministic order
         let urgent = vaults
             .iter()
@@ -146,7 +171,7 @@ impl Keeper {
             .filter(|(_, a)| rank(a) > 0)
             .max_by_key(|(_, a)| rank(a));
         if let Some((vault, action)) = urgent {
-            return self.execute(vault.outpoint, action, tick);
+            return self.execute_tracked(vault.outpoint, action, tick, height);
         }
 
         // Duties: the mint-anchor poke outranks refreshes (every issuer-gated op feeds on
@@ -160,9 +185,25 @@ impl Keeper {
             .find(|v| decide(v, tick, anchor, self.opts.refresh_lag, FEE) == Action::Refresh)
             .copied();
         if let Some(vault) = stale {
-            return self.execute(vault.outpoint, Action::Refresh, tick);
+            return self.execute_tracked(vault.outpoint, Action::Refresh, tick, height);
         }
         Ok(None)
+    }
+
+    /// Execute and, on a successful broadcast, put the vault on the acted list until the
+    /// spend confirms.
+    fn execute_tracked(
+        &mut self,
+        vault: OutPoint,
+        action: Action,
+        tick: &OracleTick,
+        height: u32,
+    ) -> Result<Option<Performed>, KeeperError> {
+        let done = self.execute(vault, action, tick)?;
+        if done.is_some() {
+            self.acted.insert(vault, height);
+        }
+        Ok(done)
     }
 
     fn known_vaults(&self) -> Vec<OnChain<VaultState>> {

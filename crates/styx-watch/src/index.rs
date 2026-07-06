@@ -339,7 +339,8 @@ impl IndexState {
                 }
                 let Some(minted) = self.pot_delta_shrink(ctx, tx, ev) else { return };
                 self.follow_reserve(ctx, tx, ev);
-                self.vault_born(ctx, owners, minted, anchor, tx, ev);
+                let birth = Birth { issuer_input: idx, debt: minted, last_height: anchor };
+                self.vault_born(ctx, owners, birth, tx, ev);
             }
             // DRAW and ATTEST both send the token to output 3; only ATTEST co-spends the
             // reserve (its bad-debt arm), and it is covenant-pinned to input 4.
@@ -494,18 +495,22 @@ impl IndexState {
 
     // --- births and successors ---------------------------------------------------
 
-    /// The vault born by an OPEN: output 0, debt = the pot delta, last_height = nLockTime.
-    /// Owner resolution tries every candidate against the actual output spk - a match is
-    /// trustless; no match leaves the vault opaque.
+    /// The vault born by an OPEN: output 0, debt = the pot delta, last_height = the
+    /// resolved anchor. Owner resolution is candidate-based and trustless either way: a
+    /// candidate only counts if `vault_spk(debt, candidate, last_height)` equals the actual
+    /// output spk. Candidates come from the configured keys (the wallet's fast path) and,
+    /// failing that, from a sliding-window search of the OPEN's issuer-input witness - the
+    /// owner travels there as a witness value, and the address commitment judges the
+    /// extraction, so no Simplicity decoding is needed. No match leaves the vault opaque.
     fn vault_born(
         &mut self,
         ctx: &Ctx,
         owners: &[XOnlyPublicKey],
-        debt: Obol,
-        last_height: BlockHeight,
+        birth: Birth,
         tx: &Transaction,
         ev: &mut Notices,
     ) {
+        let Birth { issuer_input, debt, last_height } = birth;
         let Some(out0) = tx.output.first() else {
             ev.push(Event::Anomaly { what: "OPEN without outputs" });
             return;
@@ -514,10 +519,15 @@ impl IndexState {
             ev.push(Event::Anomaly { what: "OPEN vault output not explicit policy" });
             return;
         };
-        let owner = owners.iter().copied().find(|&cand| {
+        let matches = |cand: XOnlyPublicKey| {
             let state = VaultState { debt, owner: cand, last_height };
             ctx.artifacts.vault_spk(&state) == out0.script_pubkey
-        });
+        };
+        let owner = owners
+            .iter()
+            .copied()
+            .find(|&cand| matches(cand))
+            .or_else(|| scan_witness_for_owner(tx, issuer_input, matches));
         let vault = OutPoint::new(ev.txid, 0);
         self.vaults.insert(
             vault,
@@ -727,6 +737,13 @@ impl IndexState {
 
 // --- layout helpers -----------------------------------------------------------------
 
+/// What an OPEN commits about its newborn vault, as inferred from the layout.
+struct Birth {
+    issuer_input: usize,
+    debt: Obol,
+    last_height: BlockHeight,
+}
+
 struct Notices {
     height: u32,
     txid: Txid,
@@ -769,4 +786,47 @@ fn locate_counted(tx: &Transaction, spk: &Script, asset: AssetId) -> Option<(u32
 /// Does output 0 pay the given spk with the given asset?
 fn spk_at_output0(tx: &Transaction, spk: &Script, asset: AssetId) -> bool {
     tx.output.first().is_some_and(|o| o.script_pubkey == *spk && explicit(o, asset).is_some())
+}
+
+/// Witness stack elements longer than this are skipped by the owner scan: the issuer's
+/// witness-values element (where the owner travels) is a few hundred bytes with a shape
+/// fixed by the covenant arm; the multi-kilobyte elements are the program and the control
+/// data, which cannot carry witness values. The cap bounds the scan, it does not gate
+/// correctness - a miss just leaves the vault opaque.
+const OWNER_SCAN_MAX_ELEMENT: usize = 4096;
+
+/// Recover a vault owner from the OPEN's issuer-input witness: slide a 32-byte window over
+/// every (small) witness stack element at bit granularity - Simplicity witness values are
+/// bit-packed, so the owner word need not be byte-aligned - and accept the first window
+/// that derives the vault's actual spk. The address commitment is the judge, exactly as
+/// with configured candidates, so the extraction cannot be wrong, only missing.
+fn scan_witness_for_owner(
+    tx: &Transaction,
+    input: usize,
+    matches: impl Fn(XOnlyPublicKey) -> bool,
+) -> Option<XOnlyPublicKey> {
+    let witness = &tx.input.get(input)?.witness.script_witness;
+    for element in witness.iter().filter(|e| e.len() >= 32 && e.len() <= OWNER_SCAN_MAX_ELEMENT) {
+        for bit in 0..=(element.len() * 8 - 256) {
+            let (byte, shift) = (bit / 8, (bit % 8) as u32);
+            let mut w = [0u8; 32];
+            for (i, out) in w.iter_mut().enumerate() {
+                let hi = element[byte + i] << shift;
+                let lo = if shift == 0 {
+                    0
+                } else {
+                    element.get(byte + i + 1).copied().unwrap_or(0) >> (8 - shift)
+                };
+                *out = hi | lo;
+            }
+            // Roughly half of all windows are not valid x-only points; parsing is much
+            // cheaper than the taproot derivation inside `matches`, so it goes first.
+            if let Ok(pk) = XOnlyPublicKey::from_slice(&w) {
+                if matches(pk) {
+                    return Some(pk);
+                }
+            }
+        }
+    }
+    None
 }

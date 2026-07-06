@@ -125,17 +125,24 @@ deploy/ configs.
   first quorum). The on-node acceptance runs the full owner cycle - fund, shaped open, repay,
   draw, refresh, redeem, close - with real keys, ending with the pot at full supply, the
   collateral back, and a fresh session from the snapshot agreeing state-for-state.
-- [ ] **R4 - styx-keeper.** A pure decide(vault, tick, config) -> Action ladder
-  (bad-debt / full-liq / partial with plan_partial, property-tested against the builder) plus
-  the watchtower duties (poke the issuer toward the tip, refresh dormant healthy vaults, M-2)
-  and retry-on-conflict. On-host smoke: wallet opens, oracles cheapen, keeper liquidates.
-  Design decision to settle first - owner bytes for foreign vaults (liquidation needs the
-  full vault state, and layout inference cannot yield the owner by construction): candidate
-  A is a bit-granular sliding-window search of the OPEN transaction's issuer witness for a
-  32-byte word w with vault_spk(debt, w, last_height) == the vault's spk - trustless (the
-  address commitment judges, exactly like the wallet's candidate filter), no Simplicity
-  decoding, sub-second once per vault birth; candidate B restricts the keeper to owners
-  known from config. A no-match under A degrades to today's opaque tracking.
+- [x] **R4 - styx-keeper.** Owner bytes for foreign vaults: candidate A SETTLED and landed
+  in the indexer - a bit-granular sliding-window search of the OPEN's issuer-input witness,
+  each 32-byte window verified against the vault's address commitment (trustless, exactly
+  like the wallet's candidate filter; no Simplicity decoding; a miss degrades to opaque
+  tracking), so a keeper carries full builder-consumable state for every vault born on
+  chain. The pure ladder decide(vault, tick, refresh_lag) mirrors the covenant bands at the
+  max quote (bad-debt < 100% strict, full-liq [100%, 115%] inclusive, partial under the
+  strict 130% gate, refresh for healthy-but-stale, ratcheted ticks decide nothing);
+  plan_partial binary-searches the largest dd whose max extraction fits under the heal-band
+  ceiling, residual clamped to the band floor, profitability mirrored. Property tier: every
+  verdict is accepted by its checked builder and dd+1 is refused. The keeper itself is a
+  purse (the wallet machinery reused) plus a verified book: one action per step (singleton
+  successors are unconfirmed until the next block), priority bad-debt > full-liq > partial >
+  poke > refresh, conflict-retry that resyncs and rebuilds (a vanished target is a lost
+  race, a Rejected is an invariant-break alert - policy unit-tested off node). The smoke
+  runs the escalation end to end: the wallet opens, the keeper resolves the foreign owner
+  from the witness, pokes, refreshes, heals the $50k dip partially, closes the $35k crash
+  as bad debt, and ends compensated with the pot at full supply.
 - [ ] **R5 - multi-machine assembly.** nostr-rs-relay in the flake, per-role configs/units,
   SETUP.md (bring-up across 3-4 machines), a scenario script (POST /price crash -> observe
   the cascade), and a same-host swarm rehearsal.

@@ -70,6 +70,13 @@ the core stays minimal.
   vaults are whatever its indexer sync resolves to it. OPEN's exact-funding requirement is
   met by a shaping self-spend chained in the mempool; ticks come from the relays in the
   binary and are injected at the library boundary in tests.
+- **styx-keeper** - the watchtower daemon: a purse (the wallet machinery reused) plus a
+  verified quote book. The pure ladder decide(vault, tick) mirrors the covenant bands at
+  the max quote and plan_partial sizes the heal (property-tested against the checked
+  builders); one action per step, priority bad-debt > full-liq > partial > poke > refresh;
+  broadcast conflicts resync-and-rebuild, a Rejected is an invariant-break alert. Foreign
+  vault owners come from the indexer's witness-scan recovery, so every vault born on chain
+  is a full liquidation target.
 
 ## Covenants and the freeze
 

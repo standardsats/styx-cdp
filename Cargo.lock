@@ -1923,6 +1923,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-keeper"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nostr-sdk",
+ "proptest",
+ "serde",
+ "styx-core",
+ "styx-node",
+ "styx-pset",
+ "styx-wallet",
+ "styx-watch",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "styx-node"
 version = "0.1.0"
 dependencies = [

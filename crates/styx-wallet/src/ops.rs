@@ -33,7 +33,7 @@ impl Wallet {
     }
 
     /// The smallest sufficient L-BTC coin, or a typed shortfall.
-    fn pick_lbtc(&self, need: u64) -> Result<(OutPoint, u64), WalletError> {
+    pub fn pick_lbtc(&self, need: u64) -> Result<(OutPoint, u64), WalletError> {
         let coins = self.lbtc_coins()?;
         Wallet::select_at_least(&coins, need)
             .ok_or(WalletError::InsufficientLbtc { need, have: coins.iter().map(|(_, v)| *v).sum() })
@@ -42,7 +42,7 @@ impl Wallet {
     /// One OBOL coin covering `need`: the builder layouts carry a single payer input, so a
     /// wallet whose change has fragmented consolidates first (a self-spend merge chained in
     /// the mempool) rather than failing while solvent.
-    fn ensure_obol(&self, need: u64) -> Result<(OutPoint, u64), WalletError> {
+    pub fn ensure_obol(&self, need: u64) -> Result<(OutPoint, u64), WalletError> {
         let coins = self.obol_coins()?;
         if let Some(c) = Wallet::select_at_least(&coins, need) {
             return Ok(c);

@@ -926,3 +926,40 @@ fn open_with_the_token_off_the_conventional_input_still_classifies() {
     let tracked = state.vaults.get(&OutPoint::new(tampered.tx.txid(), 0)).expect("tracked");
     assert_eq!(tracked.owner, Some(owner_pk()));
 }
+
+/// Candidate A of the R4 owner-recovery decision: with NO configured candidates, the owner
+/// comes out of the OPEN's issuer-input witness via the sliding-window scan, verified
+/// against the vault's address commitment - so a keeper tracks foreign vaults with full,
+/// builder-consumable state.
+#[test]
+fn owner_recovered_from_the_open_witness_without_candidates() {
+    let d = TestDeploy::get();
+    let ctx = &d.ctx;
+    let mut state = IndexState::genesis(ctx.genesis);
+    boot(d, &mut state);
+
+    let built = build::open::open(
+        ctx,
+        &protocol(&state),
+        &OpenIntent {
+            owner: owner_pk(),
+            principal: Obol::new(5_000_000),
+            collateral: Sats::new(100_000_000),
+            borrower_spk: op_true_spk(),
+            funding: coin(0x99, open_funding(5_000_000, 120_000, 100_000_000)),
+            tick: d.tick(10, 120_000),
+            fee: FEE,
+        },
+    )
+    .expect("builds");
+    // The finalized transaction carries the covenant witnesses (the owner travels in the
+    // issuer input's witness values); the unwitnessed body would stay opaque.
+    let tx = styx_pset::finalize::finalize(ctx, &built.plan).expect("prune accepts");
+    let notices = state.apply_tx(ctx, &[], 10, &tx);
+    assert!(matches!(
+        kind(notices.last().unwrap()),
+        Event::Opened { owner: Some(pk), .. } if *pk == owner_pk()
+    ));
+    let op = built.expected.vault.outpoint;
+    assert_eq!(vault(&state, op), built.expected.vault, "builder-consumable without candidates");
+}

@@ -1,0 +1,48 @@
+# A keeper host: its own node plus the keeper daemon.
+#
+# Mounts: node/elements.conf (as in compose.oracle.yml), keeper.toml (rpc_url =
+# "http://elementsd:18884", snapshot = "/var/lib/styx/keeper-snapshot.json"),
+# liquid-testnet.toml at the path keeper.toml's `styxnet` points to.
+services:
+  elementsd:
+    image: styx-elementsd:TAG
+    volumes:
+      - node-data:/data
+      - ./node/elements.conf:/data/elements.conf:ro
+    networks: [styx]
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/bin/elements-cli", "-datadir=/data", "getblockcount"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
+
+  keeper:
+    image: styx-keeper:TAG
+    command: ["--config", "/etc/styx/keeper.toml"]
+    volumes:
+      - ./keeper.toml:/etc/styx/keeper.toml:ro
+      - ./liquid-testnet.toml:/etc/styx/liquid-testnet.toml:ro
+      - keeper-state:/var/lib/styx
+    networks: [styx]
+    # The daemon itself tolerates a node outage for a bounded window (NODE_DOWN_FATAL),
+    # so `restart: "no"` is safe against boot races; the health gate just avoids burning
+    # that window on the initial block download.
+    depends_on:
+      elementsd:
+        condition: service_healthy
+    # NOT on-failure: exit 65 is the Rejected invariant-break alert and docker cannot
+    # filter restart by exit code (the systemd unit can). A downed keeper here wants eyes;
+    # the monitor and `docker logs` carry the alarm.
+    restart: "no"
+
+networks:
+  styx:
+    ipam:
+      config:
+        - subnet: 172.28.97.0/24
+
+volumes:
+  node-data:
+  keeper-state:

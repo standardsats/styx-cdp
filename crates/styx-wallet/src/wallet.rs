@@ -83,6 +83,21 @@ pub enum WalletError {
     ConflictExhausted { what: &'static str, attempts: u32 },
 }
 
+impl WalletError {
+    /// True when the failure is the node being unreachable or mid-restart, not anything
+    /// about the wallet's own state. The daemons tolerate these for a bounded window
+    /// instead of dying: an elementsd restart (or its container still warming up) must
+    /// not take down a keeper that will not be auto-restarted.
+    pub fn is_node_down(&self) -> bool {
+        matches!(
+            self,
+            WalletError::Node(_)
+                | WalletError::Scan(ScanError::Node(_))
+                | WalletError::Sync(SyncError::Node(_))
+        )
+    }
+}
+
 /// What a vanished target after a conflict means to the caller. A keeper losing a race is
 /// the system working (someone else liquidated first); an owner's op dissolving under
 /// them wants their eyes, not a silent success.

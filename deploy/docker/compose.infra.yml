@@ -1,0 +1,63 @@
+# The infra host: node, quote relay, TLS front, monitoring.
+#
+# Mounts expected next to this file:
+#   node/elements.conf   - as in compose.oracle.yml
+#   relay.toml           - from deploy/nostr-relay.toml.example (listen on 0.0.0.0:7877;
+#                          data_directory = "/var/lib/relay")
+#   Caddyfile            - from deploy/Caddyfile.example, reverse_proxy relay:7877
+#   liquid-testnet.toml  - the completed deployment config (for the monitor)
+services:
+  elementsd:
+    image: styx-elementsd:TAG
+    volumes:
+      - node-data:/data
+      - ./node/elements.conf:/data/elements.conf:ro
+    networks: [styx]
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/bin/elements-cli", "-datadir=/data", "getblockcount"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
+
+  relay:
+    image: styx-relay:TAG
+    command: ["--config", "/etc/relay.toml"]
+    volumes:
+      - ./relay.toml:/etc/relay.toml:ro
+      - relay-db:/var/lib/relay
+    networks: [styx]
+    restart: on-failure
+
+  # The one non-flake image: TLS termination. Pin it by digest for repeatability:
+  #   docker inspect --format='{{index .RepoDigests 0}}' caddy:2-alpine
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks: [styx]
+    restart: on-failure
+
+  monitor:
+    image: styx-monitor:TAG
+    command: ["/etc/styx/styxnet.toml", "60"]
+    volumes:
+      - ./liquid-testnet.toml:/etc/styx/styxnet.toml:ro
+    networks: [styx]
+    restart: on-failure
+
+networks:
+  styx:
+    ipam:
+      config:
+        - subnet: 172.28.98.0/24
+
+volumes:
+  node-data:
+  relay-db:
+  caddy-data:

@@ -212,7 +212,10 @@ public Liquid testnet, where strangers open vaults and liquidate each other.
   getdeploymentinfo preflight, no --self-mine) and verify; publish the completed
   liquid-testnet.toml and fill the URL placeholders in TESTNET.md; OBOL distribution for
   early keepers (a treasury vault + `send`); the multi-day soak with live_feeds green on
-  every oracle host before inviting anyone.
+  every oracle host before inviting anyone. Hosts can run the flake's reproducible
+  container images (oracle / keeper / tools / elementsd / relay / monitor - same rev, same
+  layers, proven with `nix build --rebuild`) with the per-host compose files in
+  deploy/docker/.
 
 Out of scope for these phases: FROST / multisig of the oracle protocol key, authentication
 of the oracle admin surface (it signs on demand and moves the price, so it binds loopback /

@@ -16,9 +16,126 @@
       pkgs = import nixpkgs { inherit system; };
       elementsd-simplicity =
         (import nixpkgs-elements { inherit system; }).callPackage ./nix/elementsd-simplicity.nix { };
+
+      # The workspace binaries, built hermetically from the flake's pinned inputs: the same
+      # flake rev produces the same binaries, and therefore the same container layers.
+      styx = pkgs.rustPlatform.buildRustPackage {
+        pname = "styx";
+        version = "0.1.0";
+        # Only what the build reads: doc and deploy edits must not rebuild the world.
+        src = pkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = pkgs.lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            ./crates
+            ./covenants
+          ];
+        };
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+          outputHashes = {
+            "simplicityhl-0.6.0-rc.0" = "sha256-mHWcALazH+kHfwRwaBKWgXzh458UOwJmReOgmvdh+Kg=";
+          };
+        };
+        # The test tiers run in the dev shell / CI; the package build only produces the
+        # deployment artifact.
+        doCheck = false;
+      };
+
+      imageTag = self.shortRev or self.dirtyShortRev or "dev";
+
+      # The health check as a self-contained app (shellcheck runs at build time), and a
+      # loop around it for the monitor container - journald/timers belong to hosts,
+      # `docker logs` to containers.
+      check-health = pkgs.writeShellApplication {
+        name = "check-health.sh";
+        runtimeInputs = [ pkgs.curl pkgs.gnused pkgs.gnugrep pkgs.coreutils ];
+        text = builtins.readFile ./deploy/check-health.sh;
+      };
+      monitor-loop = pkgs.writeShellApplication {
+        name = "styx-monitor-loop";
+        runtimeInputs = [ check-health pkgs.coreutils ];
+        text = ''
+          CONFIG="''${1:-/etc/styx/styxnet.toml}"
+          INTERVAL="''${2:-60}"
+          while true; do
+            check-health.sh "$CONFIG" || true
+            sleep "$INTERVAL"
+          done
+        '';
+      };
+
+      # One role, one image. Minimal closures (no shell); certificates included for the
+      # exchange feeds and wss relays; deterministic creation timestamp is dockerTools'
+      # default, so an image is repeatable from the flake rev alone.
+      #
+      # Daemons run as an unprivileged numeric uid (no /etc/passwd needed for static-ish
+      # Rust binaries). A role with on-disk state names its stateDir, created in the image
+      # with matching ownership so a named volume initializes writable. elementsd is the
+      # exception and stays root: /data is host-managed, its ownership is the deployment's
+      # call (chown the volume and add `user:` in compose to drop it).
+      nonRootUid = "65532";
+      mkImage = { name, entrypoint, contents, stateDir ? null }:
+        pkgs.dockerTools.buildLayeredImage {
+          inherit name;
+          tag = imageTag;
+          contents = contents ++ [ pkgs.cacert ];
+          fakeRootCommands = pkgs.lib.optionalString (stateDir != null) ''
+            mkdir -p .${stateDir}
+            chown ${nonRootUid}:${nonRootUid} .${stateDir}
+          '';
+          config = {
+            User = nonRootUid;
+            Entrypoint = entrypoint;
+            Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+          };
+        };
     in
     {
-      packages.${system}.elementsd = elementsd-simplicity;
+      packages.${system} = {
+        elementsd = elementsd-simplicity;
+        inherit styx;
+        oracle-image = mkImage {
+          name = "styx-oracle";
+          entrypoint = [ "${styx}/bin/styx-oracle" ];
+          contents = [ styx ];
+        };
+        keeper-image = mkImage {
+          name = "styx-keeper";
+          entrypoint = [ "${styx}/bin/styx-keeper" ];
+          contents = [ styx ];
+          stateDir = "/var/lib/styx"; # the indexer snapshot
+        };
+        # No entrypoint: `docker run styx-tools /bin/styx-wallet ...` or /bin/styx-deploy.
+        tools-image = mkImage {
+          name = "styx-tools";
+          entrypoint = [ ];
+          contents = [ styx ];
+          stateDir = "/var/lib/styx";
+        };
+        elementsd-image = pkgs.dockerTools.buildLayeredImage {
+          name = "styx-elementsd";
+          tag = imageTag;
+          contents = [ elementsd-simplicity ];
+          extraCommands = "mkdir -p data tmp";
+          config = {
+            Entrypoint = [ "${elementsd-simplicity}/bin/elementsd" "-datadir=/data" ];
+            Volumes = { "/data" = { }; };
+          };
+        };
+        relay-image = mkImage {
+          name = "styx-relay";
+          entrypoint = [ "${pkgs.nostr-rs-relay}/bin/nostr-rs-relay" ];
+          contents = [ pkgs.nostr-rs-relay ];
+          stateDir = "/var/lib/relay"; # the event database
+        };
+        monitor-image = mkImage {
+          name = "styx-monitor";
+          entrypoint = [ "${monitor-loop}/bin/styx-monitor-loop" ];
+          contents = [ monitor-loop ];
+        };
+      };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = [

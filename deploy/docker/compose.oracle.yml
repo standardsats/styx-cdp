@@ -1,0 +1,51 @@
+# One oracle host: its own Liquid-testnet node plus the oracle daemon.
+# Images come out of the flake (see README.md here); replace TAG with the flake rev tag
+# printed by the build.
+#
+# Mounts expected next to this file:
+#   node/elements.conf  - from deploy/liquidtestnet.elements.conf, with rpcbind=0.0.0.0
+#                         and rpcallowip=172.28.99.0/24 (this compose network)
+#   oracle.toml         - from deploy/oracle.toml.example, with
+#                         rpc_url = "http://elementsd:18884"
+services:
+  elementsd:
+    image: styx-elementsd:TAG
+    volumes:
+      - node-data:/data
+      - ./node/elements.conf:/data/elements.conf:ro
+    networks: [styx]
+    restart: on-failure
+    # Healthy = RPC answers (cookie auth from the datadir). start_period covers the
+    # initial block download; the daemons start only against a live RPC.
+    healthcheck:
+      test: ["CMD", "/bin/elements-cli", "-datadir=/data", "getblockcount"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
+
+  oracle:
+    image: styx-oracle:TAG
+    command: ["--config", "/etc/styx/oracle.toml"]
+    volumes:
+      - ./oracle.toml:/etc/styx/oracle.toml:ro
+    # The admin surface signs on demand and moves the price. It is published on the host
+    # so the infra machine can reach it (the central monitor walks every oracle's /health,
+    # and scenario control drives POST /price) - firewall this port to the infra host and
+    # the operator, never the public internet. See the firewall paragraph in SETUP.md.
+    ports:
+      - "9700:9700"
+    networks: [styx]
+    depends_on:
+      elementsd:
+        condition: service_healthy
+    restart: on-failure
+
+networks:
+  styx:
+    ipam:
+      config:
+        - subnet: 172.28.99.0/24
+
+volumes:
+  node-data:

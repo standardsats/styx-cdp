@@ -23,7 +23,10 @@ machine pointed at the wrong chain refuses to act.
 
 - The Simplicity-capable elementsd (the flake's `packages.elementsd`; `nix build .#elementsd`).
 - The role binaries (`cargo build --release`, or copy from a build machine):
-  styx-deploy / styx-oracle / styx-wallet / styx-keeper as the role requires.
+  styx-deploy / styx-oracle / styx-wallet / styx-keeper as the role requires. Or run
+  everything as containers: the flake builds reproducible per-role images (same rev, same
+  layers) and `deploy/docker/` carries the per-host compose files - see
+  [deploy/docker/README.md](deploy/docker/README.md).
 - A common chain config. Start from `deploy/producer.elements.conf` (machine A) and
   `deploy/follower.elements.conf` (everyone else). The consensus block at the top must be
   byte-identical everywhere: `chain`, `initialfreecoins`, `evbparams`, `pchmessagestart`.
@@ -35,9 +38,10 @@ machine pointed at the wrong chain refuses to act.
   `connect=` at machine A.
 
 Firewall: elementsd P2P (18886) open between the machines, RPC (18884) loopback only, the
-relay port (7877) open to all machines, the oracle admin ports (9700) only to whoever runs
-scenarios. The admin surface signs quotes on demand and moves the price - loopback or a
-trusted LAN, never public.
+relay port (7877) open to all machines. The oracle admin ports (9700) open to exactly two
+parties: the infra machine (the central monitor walks every oracle's /health, and scenario
+control drives the price from one place) and the operator. The admin surface signs quotes
+on demand and moves the price - an allowlist, never public.
 
 ## 1. Machine A: chain, relay, ceremony
 

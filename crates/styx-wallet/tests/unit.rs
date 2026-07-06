@@ -83,3 +83,20 @@ fn address_params_follow_the_chain_name() {
     assert_eq!(address_params("styxnet").bech_hrp.to_string(), "ert");
     assert_eq!(address_params("elementsregtest").bech_hrp.to_string(), "ert");
 }
+
+#[test]
+fn node_down_covers_every_wrapping_but_nothing_else() {
+    use styx_node::{NodeError, ScanError};
+    use styx_wallet::wallet::WalletError;
+    use styx_watch::sync::SyncError;
+
+    let rpc = || NodeError::Rpc { method: "getblockcount".into(), message: "refused".into() };
+    // The three paths a dead node surfaces through during sync().
+    assert!(WalletError::Node(rpc()).is_node_down());
+    assert!(WalletError::Scan(ScanError::Node(rpc())).is_node_down());
+    assert!(WalletError::Sync(SyncError::Node(rpc())).is_node_down());
+    // State-shaped errors stay fatal: waiting will not fix a fragmented pot or a reorg.
+    assert!(!WalletError::Scan(ScanError::PotFragmented { count: 2 }).is_node_down());
+    assert!(!WalletError::Sync(SyncError::Reorg { height: 7 }).is_node_down());
+    assert!(!WalletError::NotLive.is_node_down());
+}

@@ -1,0 +1,24 @@
+[package]
+name = "styx-explorer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "STYX v1 public explorer: read-only protocol state, no signing code in the closure"
+
+# The dependency graph IS the security claim: core / node / watch only. styx-pset (signing,
+# builders) and every key-holding crate must never appear here - the layering test pins it.
+[dependencies]
+styx-core = { path = "../styx-core" }
+styx-node = { path = "../styx-node" }
+styx-watch = { path = "../styx-watch" }
+axum = { workspace = true }
+tokio = { workspace = true }
+nostr-sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }

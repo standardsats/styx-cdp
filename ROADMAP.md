@@ -258,15 +258,21 @@ explorer that cannot sign by construction.
   the way a browser does and drives open + the dip heal through the same endpoints; the
   page-tier negatives (rebinding Host before a byte is served, placeholder substitution,
   CSP presence) run in the fast tier.
-- [ ] **U2 - the public explorer (the one hosted surface).** Read-only protocol state over
-  the R1 indexer: pot / reserve / issuer, the vault table with CR bands at the latest
-  assembled tick, per-slot oracle health (feed age), the liquidation event feed. Zero
-  keys is a dependency-graph fact, not a policy: the explorer crate links
-  styx-watch/core/node only, so no signing code enters its closure (a compile-time
-  layering test, the M0 crate-graph rule again). Ships as explorer-image behind the same
-  Caddy; TESTNET.md sends curious readers here first, and the explorer's "open a vault"
-  call-to-action points back at the styx-app download. Acceptance: the explorer renders a
-  swarm chain's crash cascade correctly and survives a soak-length uptime run.
+- [x] **U2 - the public explorer (the one hosted surface).** Read-only protocol state over
+  the R1 indexer, candidate-free (every vault opaque - all a public view needs): the vault
+  table with CR bands at the keeper ladder's exact boundaries, most endangered first;
+  per-slot oracle recency straight from the public relay (no admin surface involved); the
+  event feed from the indexer's notices. Zero keys is a graph fact: `Ctx` moved to
+  styx-core (styx-pset re-exports it), styx-watch's lib dropped its pset dependency, and
+  the explorer links core/node/watch only - a layering test pins the manifest (comment
+  lines excluded: the ratchet once tripped on its own documentation). Server-rendered HTML
+  with a meta refresh and NO script at all - the CSP has no script-src to abuse; the one
+  sanctioned external reference is the operator-configured "get styx-app" call-to-action,
+  escaped. Ships as explorer-image (in the flake, non-root, snapshot stateDir) behind the
+  Caddy in compose.infra; TESTNET.md now opens with the explorer. Acceptance: the fast
+  tier proves the bands and the internality; the e2e replays a full crash cascade and the
+  explorer tells the story back (every chapter in the feed, pot at supply, no vaults).
+  The soak-length uptime run rides the T2 ops-half soak, where a long-lived chain exists.
 - [ ] **U3 - packaging.** The same assets and API wrapped in Tauri for the desktop
   single-binary feel (a shell, not a rewrite); Umbrel / Start9 packaging of styx-app +
   elementsd (the node-runner audience is the keeper audience); per-platform release

@@ -5,7 +5,11 @@ on the public Liquid testnet, with worthless coins. Everything is permissionless
 protocol is five frozen covenants and there is no admin key anywhere; the oracles and the
 quote relay are the only operated pieces.
 
-You need three things: the binaries, a Liquid-testnet node, and the deployment config.
+Watch the protocol live first - the explorer at <EXPLORER-URL> shows every vault, the CR
+bands, oracle freshness, and the liquidation feed, straight from the chain, no install.
+
+To act, you need three things: the binaries, a Liquid-testnet node, and the deployment
+config.
 
 ## 1. Binaries and node
 

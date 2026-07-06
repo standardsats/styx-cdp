@@ -10,10 +10,6 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
-use styx_core::artifacts::Artifacts;
-use styx_core::elements::BlockHash;
-use styx_core::params::Params;
-
 pub mod build;
 pub mod error;
 pub mod finalize;
@@ -25,10 +21,4 @@ pub mod sign;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub mod testkit;
 
-/// Everything a builder needs, bundled once per deploy.
-pub struct Ctx {
-    pub params: Params,
-    pub artifacts: Artifacts,
-    /// The chain's genesis hash: part of every spend environment and sighash.
-    pub genesis: BlockHash,
-}
+pub use styx_core::artifacts::Ctx;

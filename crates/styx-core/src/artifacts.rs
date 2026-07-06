@@ -314,3 +314,13 @@ fn p2tr_spk(info: &TaprootSpendInfo) -> Script {
 fn spk_hash(spk: &Script) -> U256 {
     U256::from_byte_array(sha256::Hash::hash(spk.as_bytes()).to_byte_array())
 }
+
+/// Everything a transaction builder needs, bundled once per deploy. Lives in the core so
+/// read-only consumers (the indexer, the explorer) can hold one without linking the
+/// signing layers.
+pub struct Ctx {
+    pub params: Params,
+    pub artifacts: Artifacts,
+    /// The chain's genesis hash: part of every spend environment and sighash.
+    pub genesis: elements::BlockHash,
+}

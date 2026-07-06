@@ -43,6 +43,21 @@ services:
     networks: [styx]
     restart: on-failure
 
+  # The public read-only view; Caddy routes a hostname at it (explorer.example.org ->
+  # reverse_proxy explorer:9790). Config: explorer.toml with rpc_url = "http://elementsd:18884",
+  # listen = "0.0.0.0:9790" (public by design - it holds nothing a listener could leak),
+  # app_url = the styx-app download.
+  explorer:
+    image: styx-explorer:TAG
+    command: ["--config", "/etc/styx/explorer.toml"]
+    volumes:
+      - ./explorer.toml:/etc/styx/explorer.toml:ro
+      - ./liquid-testnet.toml:/etc/styx/liquid-testnet.toml:ro
+      - explorer-state:/var/lib/styx
+    networks: [styx]
+    depends_on: [elementsd]
+    restart: on-failure
+
   monitor:
     image: styx-monitor:TAG
     command: ["/etc/styx/styxnet.toml", "60"]
@@ -61,3 +76,4 @@ volumes:
   node-data:
   relay-db:
   caddy-data:
+  explorer-state:

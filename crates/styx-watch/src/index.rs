@@ -36,12 +36,12 @@
 
 use std::collections::BTreeMap;
 
+use styx_core::artifacts::Ctx;
 use styx_core::domain::{IssuerState, OnChain, PotState, ProtocolState, ReserveState, VaultState};
 use styx_core::elements::confidential::{Asset as CAsset, Value as CValue};
 use styx_core::elements::secp256k1_zkp::XOnlyPublicKey;
 use styx_core::elements::{AssetId, BlockHash, OutPoint, Script, Transaction, TxOut, Txid};
 use styx_core::units::{BlockHeight, Obol, Sats};
-use styx_pset::Ctx;
 
 /// A tracked vault. `owner: Some` means resolved and spk-verified; `None` means opaque - the
 /// debt / last_height / value bookkeeping still holds (the covenant enforces the layout it

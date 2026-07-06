@@ -7,7 +7,6 @@ description = "STYX v1 daemon base: shared network config, chain indexer, oracle
 
 [dependencies]
 styx-core = { path = "../styx-core" }
-styx-pset = { path = "../styx-pset" }
 styx-node = { path = "../styx-node" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -17,4 +16,7 @@ tokio = { workspace = true }
 nostr-sdk = { workspace = true }
 
 [dev-dependencies]
+# The prune-tier loop-closure tests build real transactions; the LIB stays pset-free
+# (the explorer links it and must carry no signing code).
+styx-pset = { path = "../styx-pset" }
 nostr-relay-builder = { workspace = true }

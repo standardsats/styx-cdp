@@ -2139,6 +2139,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-explorer"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "nostr-sdk",
+ "serde",
+ "serde_json",
+ "styx-core",
+ "styx-node",
+ "styx-watch",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tower",
+]
+
+[[package]]
 name = "styx-keeper"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,82 @@
+/* STYX explorer - the spec-site theme, read-only cut. System font stacks only: the public
+   page carries no font payloads to keep it feather-light (the app embeds the real faces). */
+
+:root {
+  --bg: #0b0e12;
+  --surface: #10141a;
+  --line: #222933;
+  --ink: #eae5d6;
+  --body: #b9b3a3;
+  --muted: #7e7b6e;
+  --gold: #c8a45c;
+  --gold-soft: rgba(200, 164, 92, 0.10);
+  --river: #7fa3bc;
+  --ok: #93ad84;
+  --warn: #c98a6a;
+  --bad: #c96a6a;
+  --display: "Didot", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(127,163,188,0.05), transparent 60%),
+    var(--bg);
+  color: var(--body);
+  font-family: Georgia, serif;
+  font-size: 16px;
+  line-height: 1.6;
+  padding: 1.5rem;
+  max-width: 68rem;
+  margin: 0 auto;
+}
+
+header { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+h1 { font-family: var(--display); color: var(--ink); font-weight: 400; letter-spacing: 0.06em; }
+h1 .sub { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); letter-spacing: 0; }
+h2 { font-family: var(--display); color: var(--gold); font-weight: 400; font-size: 1.05rem;
+     margin-bottom: 0.6rem; letter-spacing: 0.04em; }
+
+.chainline { font-family: var(--mono); font-size: 0.8rem; color: var(--muted);
+             display: flex; gap: 1.2rem; flex-wrap: wrap; }
+.chainline b { color: var(--ink); font-weight: 500; }
+
+main { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+        padding: 1rem 1.1rem; }
+.card.wide { grid-column: 1 / -1; }
+
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.82rem; }
+th { color: var(--muted); text-align: left; font-weight: 400; padding: 0.25rem 0.5rem 0.25rem 0; }
+td { color: var(--ink); padding: 0.3rem 0.5rem 0.3rem 0; border-top: 1px solid var(--line); }
+
+.band { padding: 0.05rem 0.5rem; border-radius: 999px; border: 1px solid var(--line);
+        font-size: 0.75rem; }
+.band.healthy { color: var(--ok); border-color: var(--ok); }
+.band.partial { color: var(--warn); border-color: var(--warn); }
+.band.full-liq { color: var(--bad); border-color: var(--bad); }
+.band.bad-debt { color: var(--bad); border-color: var(--bad); background: rgba(201,106,106,0.12); }
+.band.husk, .band.unpriced { color: var(--muted); }
+
+.slots { display: flex; gap: 0.8rem; flex-wrap: wrap; font-family: var(--mono);
+         font-size: 0.78rem; }
+.slot { border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.7rem;
+        color: var(--muted); }
+.slot b { color: var(--ink); }
+.slot.ok { border-color: var(--ok); }
+.slot.stale { border-color: var(--warn); }
+.slot.never b { color: var(--muted); }
+
+.events { list-style: none; font-family: var(--mono); font-size: 0.78rem; max-height: 22rem;
+          overflow-y: auto; }
+.events li { padding: 0.2rem 0; border-top: 1px solid var(--line); color: var(--body); }
+.events .h { color: var(--river); margin-right: 0.5rem; }
+.events .tx { color: var(--muted); margin-right: 0.5rem; }
+
+.cta { display: inline-block; color: var(--gold); border: 1px solid var(--gold);
+       background: var(--gold-soft); border-radius: 6px; padding: 0.5rem 1.2rem;
+       font-family: var(--mono); text-decoration: none; }
+.cta:hover { background: rgba(200, 164, 92, 0.2); }
+.muted { color: var(--muted); font-size: 0.85rem; }

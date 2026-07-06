@@ -30,6 +30,9 @@
             ./Cargo.lock
             ./crates
             ./covenants
+            # The app embeds the spec-site faces (one source of truth); fonts only - doc
+            # edits still must not rebuild the world.
+            ./spec-site/fonts
           ];
         };
         cargoLock = {
@@ -123,6 +126,12 @@
             Entrypoint = [ "${elementsd-simplicity}/bin/elementsd" "-datadir=/data" ];
             Volumes = { "/data" = { }; };
           };
+        };
+        explorer-image = mkImage {
+          name = "styx-explorer";
+          entrypoint = [ "${styx}/bin/styx-explorer" ];
+          contents = [ styx ];
+          stateDir = "/var/lib/styx"; # the indexer snapshot
         };
         relay-image = mkImage {
           name = "styx-relay";

@@ -4,10 +4,10 @@
 //! genesis` + `catch_up` again) - on a single-producer private chain that is the rare case,
 //! not the hot path.
 
+use styx_core::artifacts::Ctx;
 use styx_core::elements::secp256k1_zkp::XOnlyPublicKey;
 use styx_node::client::Node;
 use styx_node::NodeError;
-use styx_pset::Ctx;
 
 use crate::index::{IndexState, Notice};
 

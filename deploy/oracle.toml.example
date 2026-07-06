@@ -17,3 +17,15 @@ rpc_password = "REPLACE"
 listen = "0.0.0.0:9700"
 price_usd = 120000
 poll_ms = 500
+
+# The live price backend: the daemon polls the exchange's public spot ticker and signs the
+# result; POST /price pins a sticky override on top (DELETE /price releases it). One
+# exchange per slot keeps the quorum's five sources genuinely independent. Without this
+# section the oracle stays in manual mode: price_usd + overrides only.
+[feed]
+backend = "coinbase"   # coinbase / binance / kraken / bitstamp / bitfinex
+poll_ms = 5000
+# url = "http://..."   # endpoint override for tests and closed networks
+# max_age_secs = 60     # staleness gate: stop publishing when the backend is silent this
+                        # long - five gated oracles freeze the system safely (quorum
+                        # degrades), five ungated ones re-sign a frozen price forever

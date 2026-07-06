@@ -29,6 +29,9 @@ axum = "0.8"
 nostr-sdk = "=0.44.1"
 nostr-relay-builder = "=0.44.1"
 tower = "0.5"
+# The price feed pulls public exchange tickers over HTTPS; rustls avoids the system
+# openssl dependency in the nix shell.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [profile.test]
 # Simplicity compilation and pruning in the prune-level tier are CPU-bound; opt-level 1 keeps

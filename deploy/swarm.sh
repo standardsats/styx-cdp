@@ -25,6 +25,13 @@ P2P_PORT=7042
 RELAY_PORT=7877
 RPC="http://127.0.0.1:$RPC_PORT"
 BLOCK_INTERVAL=2
+# Soak knobs (deploy/soak.sh sets these): five backend names turn the oracles onto LIVE
+# exchange feeds (crash prices then derive from the live price), and a soak phase runs
+# health checks for the given seconds before the cascade.
+BACKENDS=(${SWARM_BACKENDS:-manual manual manual manual manual})
+SOAK_SECS=${SWARM_SOAK_SECS:-0}
+LIVE=0
+[ "${BACKENDS[0]}" != "manual" ] && LIVE=1
 
 for tool in elementsd elements-cli nostr-rs-relay cargo curl; do
   command -v "$tool" >/dev/null || { echo "$tool not on PATH (run inside nix develop)"; exit 1; }
@@ -151,6 +158,15 @@ listen = "127.0.0.1:970$i"
 price_usd = 120000
 poll_ms = 500
 EOF
+  if [ "${BACKENDS[$i]}" != "manual" ]; then
+    cat >> "$WORK/oracle-$i.toml" <<EOF
+
+[feed]
+backend = "${BACKENDS[$i]}"
+poll_ms = 5000
+max_age_secs = 60
+EOF
+  fi
 done
 {
   echo '[nostr]'
@@ -207,8 +223,21 @@ log "funding the wallet and the keeper"
 "$BIN/styx-wallet" --config "$WORK/keeper.toml" fund --sats 5000000
 wait_status "$WORK/wallet.toml" "L-BTC: 200000000"
 
-log "opening the vault: 4M OBOL against 1 BTC at \$120k"
-"$BIN/styx-wallet" --config "$WORK/wallet.toml" open --principal 4000000 --collateral 100000000
+if [ "$LIVE" = 1 ]; then
+  # The live price decides the collateral: open at 200% CR so the derived crash factors
+  # (0.60x -> the partial band at CR 120%, 0.42x -> under water after the heal) land where
+  # the fixed-price scenario does.
+  P0=$(curl -sS -m 5 http://127.0.0.1:9700/health | sed -n 's/.*"price":\([0-9]*\).*/\1/p')
+  [ -n "$P0" ] && [ "$P0" -gt 45000 ] || {
+    echo "live price $P0 too low for the funded collateral; refusing the soak" >&2
+    exit 1
+  }
+  log "opening the vault: 4M OBOL at 200% CR (live price \$$P0)"
+  "$BIN/styx-wallet" --config "$WORK/wallet.toml" open --principal 4000000 --cr 200
+else
+  log "opening the vault: 4M OBOL against 1 BTC at \$120k"
+  "$BIN/styx-wallet" --config "$WORK/wallet.toml" open --principal 4000000 --collateral 100000000
+fi
 wait_status "$WORK/wallet.toml" "vaults: 1"
 wait_status "$WORK/wallet.toml" "OBOL: 4000000"
 
@@ -223,16 +252,44 @@ PIDS+=($!)
 wait_log "Poked" "$WORK/keeper.log" 60
 log "keeper on duty (poked the anchor)"
 
+# --- 7b. the soak phase (live runs) -------------------------------------------------------
+# The system idles on real market data while the health check watches: oracles publishing,
+# feeds fresh, heights in lockstep, relay up. Any alert fails the run.
+if [ "$SOAK_SECS" -gt 0 ]; then
+  log "soaking for ${SOAK_SECS}s on live feeds"
+  SOAK_END=$(( $(date +%s) + SOAK_SECS ))
+  while [ "$(date +%s)" -lt "$SOAK_END" ]; do
+    sleep 30
+    "$ROOT/deploy/check-health.sh" "$WORK/styxnet.toml" || {
+      echo "soak health check failed" >&2
+      exit 1
+    }
+  done
+  log "soak clean"
+fi
+
 # --- 8. the crash cascade ----------------------------------------------------------------
-log "crash to \$50k: the partial band"
-"$ROOT/deploy/scenario-crash.sh" "$WORK/styxnet.toml" 50000
+if [ "$LIVE" = 1 ]; then
+  PARTIAL_PRICE=$((P0 * 60 / 100))
+  BADDEBT_PRICE=$((P0 * 42 / 100))
+else
+  PARTIAL_PRICE=50000
+  BADDEBT_PRICE=35000
+fi
+log "crash to \$$PARTIAL_PRICE: the partial band"
+"$ROOT/deploy/scenario-crash.sh" "$WORK/styxnet.toml" "$PARTIAL_PRICE"
 wait_log "Partial" "$WORK/keeper.log" 120
 log "partial liquidation done"
 
-log "crash to \$35k: under water"
-"$ROOT/deploy/scenario-crash.sh" "$WORK/styxnet.toml" 35000
+log "crash to \$$BADDEBT_PRICE: under water"
+"$ROOT/deploy/scenario-crash.sh" "$WORK/styxnet.toml" "$BADDEBT_PRICE"
 wait_log "BadDebt" "$WORK/keeper.log" 120
 log "bad-debt closure done"
+
+# A live run releases the overrides afterwards: the oracles return to the market.
+if [ "$LIVE" = 1 ]; then
+  "$ROOT/deploy/scenario-crash.sh" "$WORK/styxnet.toml" feed
+fi
 
 # --- 9. the postcondition ------------------------------------------------------------------
 wait_status "$WORK/wallet.toml" "vaults: 0"

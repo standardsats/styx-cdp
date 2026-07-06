@@ -5,5 +5,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
 pub mod config;
+pub mod feed;
 pub mod http;
 pub mod service;

@@ -17,6 +17,7 @@ tokio = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
 nostr-sdk = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

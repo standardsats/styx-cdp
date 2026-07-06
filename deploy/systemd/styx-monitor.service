@@ -1,0 +1,9 @@
+# One health pass (oracles publishing, feeds fresh, heights in lockstep, relay up).
+# Alerts land in the journal; hook OnFailure= to a notifier for paging.
+[Unit]
+Description=STYX deployment health check
+
+[Service]
+Type=oneshot
+User=styx
+ExecStart=/usr/local/bin/check-health.sh /etc/styx/styxnet.toml

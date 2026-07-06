@@ -1,0 +1,6 @@
+# TLS termination for the public quote relay: Caddy fetches and renews the certificate
+# itself; nostr-rs-relay stays plain-ws on loopback. Users connect to
+# wss://relay.YOURDOMAIN.example (nostr-sdk speaks wss natively).
+relay.YOURDOMAIN.example {
+	reverse_proxy 127.0.0.1:7877
+}

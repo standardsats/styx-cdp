@@ -175,14 +175,44 @@ public Liquid testnet, where strangers open vaults and liquidate each other.
   (a vault dissolving mid-op wants eyes); the issuer singleton serializes every open and
   draw globally, and the owner-cycle e2e now manufactures that contention deterministically
   (a poke lands under a stale wallet view; the eventual draw conflicts, resyncs, lands).
-- [ ] **T1 - price feed with scenario override.** A real feed behind the PriceSource seam
-  (per-oracle, so quorum divergence stays honest), with the admin POST /price kept as a
-  manual override for staged crashes on the private network.
-- [ ] **T2 - public infrastructure.** Relay behind TLS, oracle hosts, the published
-  completed liquid-testnet.toml, tL-BTC bootstrap (faucet -> the wallet's unblinded
-  funding address; confidential faucet coins cannot enter the raw funding paths), OBOL
-  distribution for keepers, a user-facing testnet quickstart, monitoring, and a soak run
-  before inviting anyone.
+- [x] **T1 - price feed with scenario override.** The `PriceSource` seam is a trait with
+  five exchange backends (Coinbase / Binance / Kraken / Bitstamp / Bitfinex - one per slot,
+  so the quorum's divergence reflects genuinely independent sources), polled over public
+  spot tickers: at one quote per block, a few-second poll is far below the staleness that
+  matters, and every poll is a fresh connection (a websocket backend would implement the
+  same trait). Parsers are pure and fast-tier-tested on canned exchange bodies, with sanity
+  bounds; a failed poll keeps the last price and /health surfaces the feed age. The
+  effective price layers a sticky override on top of the feed: POST /price pins a staged
+  crash that holds still while the market ticks underneath, DELETE /price releases it
+  (scenario-crash.sh grew the `feed` argument). The endpoint is configurable per oracle,
+  which is also the test seam - the integration test runs the whole loop against a local
+  mock exchange, no network in any test tier. Systemic staleness (all five backends silent
+  at once - one datacenter, a regional block, DNS) is a decided trade-off, not an
+  oversight: the opt-in `max_age_secs` gate makes a quiet oracle WITHHOLD quotes, so
+  correlated silence degrades the quorum into a safe freeze instead of five oracles
+  re-signing a frozen price the covenants cannot tell from a live one; the operator
+  override still publishes (scenario control beats a dead feed).
+- [x] **T2 (in-repo half) - public-infrastructure tooling and docs.** TESTNET.md is the
+  stranger-facing quickstart (faucet straight to the unblinded funding address -
+  confidential coins cannot enter the raw funding paths; open at --cr from the live
+  price; run a keeper and hunt); deploy/ grew the Liquid-testnet node config, the
+  liquid-testnet.toml skeleton, the Caddyfile terminating wss:// for the relay,
+  check-health.sh (oracles publishing / feeds fresh / heights in lockstep / relay up) with
+  the styx-monitor systemd timer, and soak.sh - the swarm on LIVE exchange feeds with
+  health checks throughout and the cascade at prices derived from the live one. SETUP.md
+  documents the testnet deployment differences (federation blocks, faucet bootstrap, TLS
+  relay, publish the completed config). The network tier exists and ran: live_feeds
+  validates every reachable exchange against today's real API (3/5 reachable from the dev
+  sandbox, all parsed), and a live soak passed end to end - three exchanges quoting
+  genuinely divergent prices, the cascade derived from the market, the oracles returned to
+  it after.
+- [ ] **T2 (ops half) - the actual deployment.** Hosts for the five oracles (one exchange
+  each, max_age_secs armed) + infra (relay behind the Caddyfile, monitoring timer wired to
+  a notifier); DNS + TLS; the ceremony on Liquid testnet (faucet-funded deploy wallet,
+  getdeploymentinfo preflight, no --self-mine) and verify; publish the completed
+  liquid-testnet.toml and fill the URL placeholders in TESTNET.md; OBOL distribution for
+  early keepers (a treasury vault + `send`); the multi-day soak with live_feeds green on
+  every oracle host before inviting anyone.
 
 Out of scope for these phases: FROST / multisig of the oracle protocol key, authentication
 of the oracle admin surface (it signs on demand and moves the price, so it binds loopback /

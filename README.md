@@ -13,6 +13,8 @@ no multisig, federation, or admin keys.
   and the role daemons (oracle, wallet, keeper). See [ARCHITECTURE.md](ARCHITECTURE.md).
 - [GUIDE.md](GUIDE.md) - the hands-on walkthrough: deploy, oracles, a vault and every op on
   it, the keeper, a price-crash liquidation.
+- [TESTNET.md](TESTNET.md) - join the public Liquid-testnet deployment: faucet, a vault,
+  and hunting other people's positions with a keeper.
 - [SETUP.md](SETUP.md) - multi-machine network bring-up; `deploy/swarm.sh` rehearses the
   whole topology on one host.
 - [ROADMAP.md](ROADMAP.md) - milestone status.

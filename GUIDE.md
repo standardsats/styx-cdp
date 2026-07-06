@@ -174,18 +174,30 @@ for i in 0 1 2 3 4; do
 done
 ```
 
-Each daemon signs its configured price at every new block and publishes one addressable
-Nostr event per height. Poke the surfaces:
+Each daemon signs its current price at every new block and publishes one addressable
+Nostr event per height. Without a `[feed]` section the price is manual (the config value
+plus overrides); a live market needs one exchange per slot, so the quorum's five sources
+stay genuinely independent:
 
-```bash
-curl http://127.0.0.1:9700/health            # {"slot":0,"height":...,"price":120000}
-curl "http://127.0.0.1:9700/quote?height=42" # a freshly signed quote, the backup channel
-curl -X POST -H 'content-type: application/json' -d '{"usd":115000}' \
-    http://127.0.0.1:9700/price              # move ONE oracle's price
+```toml
+[feed]
+backend = "coinbase"   # coinbase / binance / kraken / bitstamp / bitfinex, one per slot
+poll_ms = 5000
 ```
 
-A single moved oracle only drags the quorum's min (or max) if it makes the assembled
-three; crashing the market for real means moving all of them - that is what
+Poke the surfaces:
+
+```bash
+curl http://127.0.0.1:9700/health            # {"slot":0,...,"source":"feed","feed_age_secs":2}
+curl "http://127.0.0.1:9700/quote?height=42" # a freshly signed quote, the backup channel
+curl -X POST -H 'content-type: application/json' -d '{"usd":115000}' \
+    http://127.0.0.1:9700/price              # pin ONE oracle's price (sticky override)
+curl -X DELETE http://127.0.0.1:9700/price   # release it back to the feed
+```
+
+The override is sticky: a staged crash holds still while the feed keeps ticking
+underneath. A single pinned oracle only drags the quorum's min (or max) if it makes the
+assembled three; crashing the market for real means pinning all of them - that is what
 `deploy/scenario-crash.sh` does, later.
 
 ## 6. The wallet
@@ -348,7 +360,8 @@ shortfall plus the bounty (capped at 20% of debt and by its balance). The vault 
 reserve visibly smaller, and the keeper's L-BTC noticeably larger than it was funded
 with - that is the liquidation premium doing its job.
 
-Recovery is just the mirror: raise the price back and open again.
+Recovery is just the mirror: raise the price back (or release the overrides to a live
+feed - `deploy/scenario-crash.sh $WORK/styxnet.toml feed`) and open again.
 
 ## 11. Reading the system
 

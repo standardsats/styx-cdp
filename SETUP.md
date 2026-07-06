@@ -164,6 +164,34 @@ Watch the cascade in the keeper journal and in `styx-wallet status`. The reserve
 keeper the shortfall cover on a bad debt; the pot returns to the full supply once every
 debt is burned.
 
+## Deploying on the public Liquid testnet
+
+The same bring-up with three differences, all already encoded in the tooling:
+
+- No producer and no `--self-mine`: the federation makes the blocks (about one a minute),
+  and the ceremony awaits them. Node config is `deploy/liquidtestnet.elements.conf` -
+  nothing in it is consensus, the public chain's params are built in. Confirm Simplicity
+  before deploying: `elements-cli getdeploymentinfo`.
+- The infra wallet's tL-BTC comes from a faucet, to an UNBLINDED address (the deploy
+  wallet's coins must be explicit for the raw ceremony paths): create the wallet, get an
+  address, `getaddressinfo` it and use the `unconfidential` form with the faucet. Fund it
+  well: the ceremony pays the issuances, the reserve seed, and every user bootstrap later.
+- The relay goes behind TLS. `deploy/Caddyfile.example` terminates
+  `wss://relay.YOURDOMAIN` and proxies to nostr-rs-relay on loopback; the published
+  config then lists the wss URL.
+
+Skeleton: `deploy/liquid-testnet.skeleton.toml` (chain = liquidtestnet). Oracles run one
+exchange each (`[feed]` in oracle.toml with `max_age_secs` armed - a quiet feed must
+degrade the quorum, not freeze the price). After `styx-deploy run` + `verify`, the
+completed liquid-testnet.toml IS the artifact users download - publish it somewhere
+immutable-ish and reference it from TESTNET.md.
+
+Monitoring: `deploy/check-health.sh <config>` is one pass over every oracle's /health
+(publishing, feed freshness, heights in lockstep) and the relay; wire it as
+`deploy/systemd/styx-monitor.{service,timer}` and hook OnFailure= to a notifier. Before
+inviting anyone, run the network-tier feed validation on each oracle host
+(`cargo test -p styx-oracle --test live_feeds -- --ignored`) and a soak (below).
+
 ## The one-host rehearsal
 
 Inside `nix develop`:
@@ -176,3 +204,11 @@ launches the whole topology as local processes (chain, relay, 5 oracles, wallet,
 opens a vault, hands the principal to the keeper, and drives the crash cascade end to
 end. It exits 0 only after the bad-debt closure and the pot back at the full supply. Logs
 land in the workdir, one file per process.
+
+The soak variant runs the same topology on LIVE exchange feeds: the system idles on real
+market data under the health check for the given duration, then the cascade runs at
+prices derived from the live one and the oracles return to the market:
+
+```bash
+deploy/soak.sh 3600 [workdir]     # SOAK_BACKENDS overrides the exchange list
+```

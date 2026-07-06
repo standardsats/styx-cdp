@@ -69,9 +69,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keypair = parse_protocol_key(&cfg.protocol_seckey)?;
     let nostr_keys = nostr_sdk::Keys::parse(&cfg.nostr_seckey)?;
 
-    let state = Arc::new(OracleState::new(slot, keypair, Price::new(cfg.price_usd)));
+    let max_feed_age =
+        cfg.feed.as_ref().and_then(|f| f.max_age_secs).map(std::time::Duration::from_secs);
+    let state = Arc::new(
+        OracleState::new(slot, keypair, Price::new(cfg.price_usd)).with_max_feed_age(max_feed_age),
+    );
     let node = Node::from_url(&cfg.rpc_url, cfg.auth()?)?;
     let mut transport = NostrQuotes::publisher(&cfg.relays, nostr_keys).await?;
+
+    // The live price backend, when configured: updates land under any sticky override.
+    if let Some(feed_cfg) = &cfg.feed {
+        let backend: styx_oracle::feed::Backend = feed_cfg.backend.parse()?;
+        let source = styx_oracle::feed::HttpFeed::new(backend, feed_cfg.url.clone())?;
+        let feed_state = state.clone();
+        let poll = Duration::from_millis(feed_cfg.poll_ms);
+        tokio::spawn(styx_oracle::service::run_feed(source, feed_state, poll));
+        println!("feed: {} every {}ms", backend.name(), feed_cfg.poll_ms);
+    }
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
     println!(

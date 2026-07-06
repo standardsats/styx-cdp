@@ -1,0 +1,39 @@
+# The operator's skeleton for the PUBLIC Liquid-testnet deployment. Same shape as the
+# styxnet skeleton; `styx-deploy run` (NO --self-mine: the federation makes the blocks)
+# completes it, and the completed file is what gets published for users to download.
+
+[network]
+chain = "liquidtestnet"
+
+[[oracles]]
+slot = 0
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://ORACLE-0-LAN:9700"
+
+[[oracles]]
+slot = 1
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://ORACLE-1-LAN:9700"
+
+[[oracles]]
+slot = 2
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://ORACLE-2-LAN:9700"
+
+[[oracles]]
+slot = 3
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://ORACLE-3-LAN:9700"
+
+[[oracles]]
+slot = 4
+protocol_pk = "REPLACE"
+nostr_pk = "REPLACE"
+admin_url = "http://ORACLE-4-LAN:9700"
+
+[nostr]
+relays = ["wss://relay.YOURDOMAIN.example"]

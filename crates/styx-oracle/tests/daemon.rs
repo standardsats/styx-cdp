@@ -233,3 +233,125 @@ price_usd = {price}
     assert!(matches!(OracleConfig::parse(&toml(0)), Err(ConfigError::ZeroPrice)));
     assert_eq!(OracleConfig::parse(&toml(120_000)).expect("parses").price_usd, 120_000);
 }
+
+/// The live feed path against a local mock exchange: the state follows the backend, a
+/// sticky override pins the price while the feed keeps ticking underneath, and clearing
+/// the override hands the price back to the feed.
+#[tokio::test]
+async fn the_feed_follows_the_exchange_and_yields_to_the_override() {
+    use styx_oracle::feed::{Backend, HttpFeed};
+    use styx_oracle::service::{run_feed, PriceMode};
+
+    // A Coinbase-shaped mock exchange with a movable price.
+    let quoted = Arc::new(AtomicU32::new(120_000));
+    let mock = {
+        let quoted = quoted.clone();
+        axum::Router::new().route(
+            "/spot",
+            axum::routing::get(move || {
+                let quoted = quoted.clone();
+                async move {
+                    format!(
+                        r#"{{"data":{{"amount":"{}.00","base":"BTC","currency":"USD"}}}}"#,
+                        quoted.load(Ordering::SeqCst)
+                    )
+                }
+            }),
+        )
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/spot", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, mock).await;
+    });
+
+    let s = state(1); // config price 1: the feed must displace it immediately
+    let source = HttpFeed::new(Backend::Coinbase, Some(url)).unwrap();
+    tokio::spawn(run_feed(source, s.clone(), Duration::from_millis(25)));
+
+    let wait_price = |s: Arc<styx_oracle::service::OracleState>, want: u32| async move {
+        for _ in 0..200 {
+            if s.price() == Price::new(want) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("price never reached {want} (at {})", s.price().raw());
+    };
+
+    // The backend's price lands and /health calls it a feed.
+    wait_price(s.clone(), 120_000).await;
+    assert_eq!(s.mode(), PriceMode::Feed);
+    assert!(s.feed_age_secs().is_some());
+
+    // The exchange moves; the oracle follows.
+    quoted.store(118_000, Ordering::SeqCst);
+    wait_price(s.clone(), 118_000).await;
+
+    // A staged crash pins the price regardless of the live feed underneath.
+    s.set_override(Price::new(50_000));
+    assert_eq!(s.price(), Price::new(50_000));
+    assert_eq!(s.mode(), PriceMode::Override);
+    quoted.store(119_000, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(s.price(), Price::new(50_000), "the override is sticky");
+
+    // Clearing it hands the price back to the (still ticking) feed.
+    s.clear_override();
+    wait_price(s.clone(), 119_000).await;
+    assert_eq!(s.mode(), PriceMode::Feed);
+}
+
+/// The staleness gate: with max_feed_age armed, the oracle withholds quotes until the
+/// backend delivers and again once it goes quiet - silence degrades the quorum into a
+/// safe freeze, a frozen price would not. The operator's override publishes regardless.
+#[tokio::test]
+async fn the_staleness_gate_withholds_quotes_when_the_feed_goes_quiet() {
+    let s = Arc::new(
+        styx_oracle::service::OracleState::new(
+            OracleSlot::new(0).unwrap(),
+            keypair(7),
+            Price::new(120_000),
+        )
+        .with_max_feed_age(Some(Duration::from_millis(80))),
+    );
+
+    // Before the first delivery: gated (publishing the config price would BE the frozen
+    // price the gate exists to prevent).
+    assert!(!s.publishable());
+
+    // A delivery opens the gate; the block loop confirms by actually publishing.
+    s.set_feed_price(Price::new(121_000));
+    assert!(s.publishable());
+    let hub = MockHub::new();
+    let mut consumer = hub.endpoint();
+    let mut oracle_side = hub.endpoint();
+    let loop_state = s.clone();
+    let task = tokio::spawn(async move {
+        publish_blocks(
+            loop_state,
+            &mut oracle_side,
+            move || Ok(5),
+            Duration::from_millis(10),
+            Duration::from_secs(60),
+        )
+        .await
+    });
+    let q = tokio::time::timeout(Duration::from_secs(5), consumer.recv()).await.unwrap().unwrap();
+    assert_eq!(q.price, 121_000);
+    task.abort();
+
+    // The backend goes quiet past the limit: gated again...
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert!(!s.publishable(), "silent past max_feed_age");
+
+    // ...unless the operator pins an override (scenario control beats a dead feed).
+    s.set_override(Price::new(50_000));
+    assert!(s.publishable());
+    s.clear_override();
+    assert!(!s.publishable());
+
+    // A fresh delivery reopens it.
+    s.set_feed_price(Price::new(119_000));
+    assert!(s.publishable());
+}

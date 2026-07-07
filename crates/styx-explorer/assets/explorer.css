@@ -47,6 +47,7 @@ main { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
         padding: 1rem 1.1rem; }
 .card.wide { grid-column: 1 / -1; }
+.pair { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; align-items: start; }
 
 table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.82rem; }
 th { color: var(--muted); text-align: left; font-weight: 400; padding: 0.25rem 0.5rem 0.25rem 0; }

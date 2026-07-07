@@ -33,8 +33,10 @@ fn fmt(n: u64) -> String {
 }
 
 fn short(outpoint: &str) -> String {
-    let vout = outpoint.split(':').nth(1).unwrap_or("?");
-    format!("{}:{}", &outpoint[..outpoint.len().min(8)], vout)
+    // elements' OutPoint Display is "[elements]<txid>:<vout>"; show the txid head, not the prefix.
+    let (txid, vout) = outpoint.rsplit_once(':').unwrap_or((outpoint, "?"));
+    let txid = txid.strip_prefix("[elements]").unwrap_or(txid);
+    format!("{}:{}", &txid[..txid.len().min(8)], vout)
 }
 
 /// The page. `app_url` is the one optional external reference (the "open a vault"
@@ -105,6 +107,10 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
     }
     html.push_str("</section>");
 
+    // Singletons and oracles share one full-width row (their own two-column grid) so the
+    // relay address has room to sit on one line.
+    html.push_str("<div class=\"pair\">");
+
     // The protocol singletons, linked to the public explorer so anyone can confirm the
     // indexer is tracking the real on-chain outputs.
     if let Some(p) = &v.protocol {
@@ -146,6 +152,7 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         html.push_str(&format!("<span class=\"slot {cls}\">{label}<br><b>{text}</b>{price}</span>"));
     }
     html.push_str("</div></section>");
+    html.push_str("</div>"); // close .pair
 
     // The event feed.
     html.push_str("<section class=\"card wide\"><h2>Events</h2>");

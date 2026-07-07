@@ -102,7 +102,7 @@ async fn quote_loop(
                 Ok(q) => {
                     let tip = state.index.read().unwrap_or_else(|e| e.into_inner()).height;
                     if book.insert(&q, BlockHeight::new(tip)).is_ok() {
-                        state.saw_slot(q.slot as usize);
+                        state.saw_slot(q.slot as usize, &q.name);
                         for h in (tip.saturating_sub(8)..=tip).rev() {
                             if let Some(tick) = book.assemble_tick(BlockHeight::new(h)) {
                                 state.set_tick(tick);

@@ -24,6 +24,7 @@ pub struct ExplorerState {
     events: Mutex<VecDeque<Notice>>,
     tick: RwLock<Option<(OracleTick, Instant)>>,
     slot_seen: Mutex<[Option<Instant>; 5]>,
+    slot_name: Mutex<[Option<String>; 5]>,
 }
 
 impl ExplorerState {
@@ -33,6 +34,7 @@ impl ExplorerState {
             events: Mutex::new(VecDeque::new()),
             tick: RwLock::new(None),
             slot_seen: Mutex::new([None; 5]),
+            slot_name: Mutex::new([const { None }; 5]),
         })
     }
 
@@ -57,9 +59,12 @@ impl ExplorerState {
             .map(|(t, _)| t.clone())
     }
 
-    pub fn saw_slot(&self, slot: usize) {
+    pub fn saw_slot(&self, slot: usize, name: &str) {
         if let Some(s) = self.slot_seen.lock().unwrap_or_else(|e| e.into_inner()).get_mut(slot) {
             *s = Some(Instant::now());
+        }
+        if let Some(n) = self.slot_name.lock().unwrap_or_else(|e| e.into_inner()).get_mut(slot) {
+            *n = (!name.is_empty()).then(|| name.to_string());
         }
     }
 
@@ -98,6 +103,7 @@ impl ExplorerState {
             })
             .collect();
         let ages = *self.slot_seen.lock().unwrap_or_else(|e| e.into_inner());
+        let names = self.slot_name.lock().unwrap_or_else(|e| e.into_inner()).clone();
         View {
             height: index.height,
             protocol,
@@ -109,6 +115,7 @@ impl ExplorerState {
             lost: index.lost.len(),
             events,
             oracle_age_secs: ages.map(|s| s.map(|at| at.elapsed().as_secs())),
+            oracle_name: names,
         }
     }
 }
@@ -192,4 +199,6 @@ pub struct View {
     pub events: Vec<EventView>,
     /// Seconds since each oracle slot last published to the relay; None = never seen.
     pub oracle_age_secs: [Option<u64>; 5],
+    /// Each slot's self-declared name from its latest quote; None = unnamed or never seen.
+    pub oracle_name: [Option<String>; 5],
 }

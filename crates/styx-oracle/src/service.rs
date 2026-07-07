@@ -54,6 +54,8 @@ pub struct OracleState {
     /// the covenants. The trade-off (liveness loss against stale-price risk) is the
     /// operator's, hence opt-in; a sticky override always publishes.
     max_feed_age: Option<Duration>,
+    /// The self-declared display label the explorer shows for this slot. Empty = unnamed.
+    name: String,
     /// The last height a quote was published for; 0 means none yet.
     pub last_published: AtomicU32,
 }
@@ -67,6 +69,7 @@ impl OracleState {
             override_price: RwLock::new(None),
             feed_updated: RwLock::new(None),
             max_feed_age: None,
+            name: String::new(),
             last_published: AtomicU32::new(0),
         }
     }
@@ -74,6 +77,12 @@ impl OracleState {
     /// Arm the staleness gate (builder-style, before the state goes behind an Arc).
     pub fn with_max_feed_age(mut self, limit: Option<Duration>) -> Self {
         self.max_feed_age = limit;
+        self
+    }
+
+    /// Set the display label the explorer shows for this slot (builder-style).
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
         self
     }
 
@@ -142,7 +151,9 @@ impl OracleState {
     /// phase computes a real backing_k later).
     pub fn quote_for(&self, height: BlockHeight) -> WireQuote {
         let payload = TickPayload { height, price: self.price(), backing_k: K_PAR };
-        WireQuote::sign(&self.keypair, self.slot, &payload)
+        let mut quote = WireQuote::sign(&self.keypair, self.slot, &payload);
+        quote.name = self.name.clone();
+        quote
     }
 }
 

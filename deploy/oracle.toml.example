@@ -3,6 +3,8 @@
 # treat the file as a secret (chmod 600).
 
 slot = 0
+# Display label the explorer shows for this slot (e.g. the exchange it tracks). Optional.
+name = "coinbase"
 protocol_seckey = "REPLACE"
 nostr_seckey = "REPLACE"
 relays = ["ws://10.0.0.10:7877"]

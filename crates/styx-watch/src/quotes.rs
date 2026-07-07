@@ -27,6 +27,11 @@ pub struct WireQuote {
     pub price: u32,
     pub backing_k: u32,
     pub sig: String,
+    /// The oracle's self-declared display label, carried for the explorer. Outside the
+    /// signed digest (the covenant never sees it); the Nostr event's own signature is what
+    /// authenticates it as this oracle's. Empty when the oracle set no name.
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,6 +63,7 @@ impl WireQuote {
             price: payload.price.raw(),
             backing_k: payload.backing_k.raw(),
             sig: q.sig.iter().map(|b| format!("{b:02x}")).collect(),
+            name: String::new(),
         }
     }
 

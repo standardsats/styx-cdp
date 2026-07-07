@@ -25,6 +25,10 @@ pub enum ConfigError {
 pub struct OracleConfig {
     /// The oracle's quorum slot (0..=4), matching its key's position in styxnet.toml.
     pub slot: u8,
+    /// A self-declared display label the explorer shows instead of the bare slot number
+    /// (e.g. the exchange it tracks). Carried on every quote; empty falls back to the slot.
+    #[serde(default)]
+    pub name: String,
     /// The covenant oracle secret key (32-byte hex) - what signs tick digests.
     pub protocol_seckey: String,
     /// The Nostr transport secret key (hex or nsec) - carriage identity only.

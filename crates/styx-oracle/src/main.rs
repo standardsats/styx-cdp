@@ -72,7 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_feed_age =
         cfg.feed.as_ref().and_then(|f| f.max_age_secs).map(std::time::Duration::from_secs);
     let state = Arc::new(
-        OracleState::new(slot, keypair, Price::new(cfg.price_usd)).with_max_feed_age(max_feed_age),
+        OracleState::new(slot, keypair, Price::new(cfg.price_usd))
+            .with_max_feed_age(max_feed_age)
+            .with_name(cfg.name.clone()),
     );
     let node = Node::from_url(&cfg.rpc_url, cfg.auth()?)?;
     let mut transport = NostrQuotes::publisher(&cfg.relays, nostr_keys).await?;

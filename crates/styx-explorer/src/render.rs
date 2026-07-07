@@ -113,7 +113,9 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
             Some(a) => ("stale", format!("{a}s ago")),
             None => ("never", "never".into()),
         };
-        html.push_str(&format!("<span class=\"slot {cls}\">slot {slot}<br><b>{text}</b></span>"));
+        // The oracle's own name if it published one, else the bare slot.
+        let label = v.oracle_name[slot].as_deref().map(esc).unwrap_or_else(|| format!("slot {slot}"));
+        html.push_str(&format!("<span class=\"slot {cls}\">{label}<br><b>{text}</b></span>"));
     }
     html.push_str("</div></section>");
 

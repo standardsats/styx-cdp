@@ -18,6 +18,10 @@ const EVENTS_KEPT: usize = 100;
 
 /// A tick older than this is not shown as current (the app's constant, same rationale).
 pub const TICK_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(180);
+/// A tick older than this still prices the bands (until `TICK_MAX_AGE`) but is flagged
+/// stale: the oracle publishes roughly per block, so a tick this old has missed one and
+/// the health it implies may be behind the chain.
+pub const TICK_FRESH: std::time::Duration = std::time::Duration::from_secs(90);
 
 pub struct ExplorerState {
     pub index: RwLock<IndexState>,
@@ -78,8 +82,16 @@ impl ExplorerState {
 
     /// One consistent snapshot for both the page and /api/state.
     pub fn view(&self) -> View {
-        let tick = self.tick();
-        let hi = tick.as_ref().map(|t| t.price_range().1);
+        // Read the tick with its age in one snapshot: the bands and the freshness marker
+        // must describe the same tick.
+        let ticked: Option<(OracleTick, u64)> = self
+            .tick
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() <= TICK_MAX_AGE)
+            .map(|(t, at)| (t.clone(), at.elapsed().as_secs()));
+        let hi = ticked.as_ref().map(|(t, _)| t.price_range().1);
         let index = self.index.read().unwrap_or_else(|e| e.into_inner());
         let protocol = index.protocol().map(|p| {
             let singleton = |name: &'static str, op: &styx_core::elements::OutPoint| SingletonView {
@@ -129,10 +141,11 @@ impl ExplorerState {
         View {
             height: index.height,
             protocol,
-            tick: tick.as_ref().map(|t| {
+            tick: ticked.as_ref().map(|(t, age)| {
                 let (lo, hi) = t.price_range();
-                TickView { height: t.height().raw(), lo: lo.raw(), hi: hi.raw() }
+                TickView { height: t.height().raw(), lo: lo.raw(), hi: hi.raw(), age_secs: *age }
             }),
+            pricing_stale: ticked.as_ref().is_some_and(|(_, age)| *age > TICK_FRESH.as_secs()),
             vaults,
             lost: index.lost.len(),
             events,
@@ -205,6 +218,8 @@ pub struct TickView {
     pub height: u32,
     pub lo: u32,
     pub hi: u32,
+    /// Seconds since this tick was assembled - how current the vault bands are.
+    pub age_secs: u64,
 }
 
 #[derive(Serialize)]
@@ -231,6 +246,8 @@ pub struct View {
     pub height: u32,
     pub protocol: Option<ProtocolView>,
     pub tick: Option<TickView>,
+    /// The current tick is older than `TICK_FRESH`: bands may lag the chain.
+    pub pricing_stale: bool,
     pub vaults: Vec<VaultView>,
     pub lost: usize,
     pub events: Vec<EventView>,

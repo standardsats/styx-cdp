@@ -15,6 +15,13 @@ pub fn css() -> &'static str {
     CSS
 }
 
+/// A tiny self-hosted favicon (the gold meander three-bar mark on obsidian), served at
+/// /favicon.svg so it stays same-origin under the `img-src 'self'` CSP.
+pub const FAVICON: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\
+<rect width=\"64\" height=\"64\" rx=\"14\" fill=\"#0b0e12\"/>\
+<g fill=\"#c8a45c\"><rect x=\"16\" y=\"17\" width=\"32\" height=\"5\"/>\
+<rect x=\"21\" y=\"29\" width=\"22\" height=\"5\"/><rect x=\"16\" y=\"42\" width=\"32\" height=\"5\"/></g></svg>";
+
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -32,6 +39,12 @@ fn fmt(n: u64) -> String {
     out
 }
 
+/// OBOL is denominated in cents; show it as dollars so the debt reads like a price, not a
+/// raw cent count ($1,000.00, not 100,000).
+fn usd(cents: u64) -> String {
+    format!("${}.{:02}", fmt(cents / 100), cents % 100)
+}
+
 fn short(outpoint: &str) -> String {
     // elements' OutPoint Display is "[elements]<txid>:<vout>"; show the txid head, not the prefix.
     let (txid, vout) = outpoint.rsplit_once(':').unwrap_or((outpoint, "?"));
@@ -47,7 +60,9 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <meta http-equiv=\"refresh\" content=\"10\">\
-         <title>STYX explorer</title><link rel=\"stylesheet\" href=\"/explorer.css\"></head><body>",
+         <title>STYX explorer</title>\
+         <link rel=\"icon\" href=\"/favicon.svg\">\
+         <link rel=\"stylesheet\" href=\"/explorer.css\"></head><body>",
     );
     html.push_str("<header><h1>\u{3a3}\u{3a4}\u{3a5}\u{39e} <span class=\"sub\">explorer</span></h1>");
     html.push_str(&format!("<div class=\"chainline\"><span>height <b>{}</b></span>", v.height));
@@ -62,11 +77,22 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         )),
         None => html.push_str("<span>price <b>no quorum</b></span>"),
     }
+    // How current the pricing (and therefore the vault bands) is.
+    if let Some(t) = &v.tick {
+        let cls = if v.pricing_stale { "stale" } else { "" };
+        html.push_str(&format!(
+            "<span class=\"tickage {}\">tick h{} &middot; {}s ago{}</span>",
+            cls,
+            t.height,
+            t.age_secs,
+            if v.pricing_stale { " (stale)" } else { "" },
+        ));
+    }
     if let Some(p) = &v.protocol {
         html.push_str(&format!(
-            "<span>pot <b>{}</b> OBOL</span><span>reserve <b>{}</b> sats</span>\
+            "<span>pot <b>{}</b></span><span>reserve <b>{}</b> sats</span>\
              <span>anchor <b>{}</b></span>",
-            fmt(p.pot_units),
+            usd(p.pot_units),
             fmt(p.reserve_sats),
             p.issuer_anchor,
         ));
@@ -84,15 +110,19 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         );
         for vt in &v.vaults {
             let cr = vt.cr_percent.map(|c| format!("{c}%")).unwrap_or_else(|| "-".into());
+            // On a stale tick the band may lag the chain; dim it so it does not read as a
+            // confident current verdict.
+            let band_cls = if v.pricing_stale { "band stale" } else { "band" };
             html.push_str(&format!(
                 "<tr><td><a href=\"https://liquid.network/testnet/tx/{}\" target=\"_blank\" \
                  rel=\"noopener\">{}</a></td><td>{}</td><td>{}</td><td>{}</td>\
-                 <td><span class=\"band {}\">{}</span></td><td>{}</td></tr>",
+                 <td><span class=\"{} {}\">{}</span></td><td>{}</td></tr>",
                 esc(&vt.txid),
                 esc(&short(&vt.outpoint)),
-                fmt(vt.debt_units),
+                usd(vt.debt_units),
                 fmt(vt.collateral_sats),
                 cr,
+                band_cls,
                 vt.band,
                 vt.band,
                 vt.last_height,

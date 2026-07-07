@@ -100,7 +100,7 @@ fn bands_match_the_keeper_ladder() {
 fn the_page_renders_and_stays_internal() {
     let state = synthetic();
     let html = page(&state.view(), None);
-    for expected in ["bad-debt", "partial", "healthy", "125%", "95,000,000", "no quorum"] {
+    for expected in ["bad-debt", "partial", "healthy", "125%", "$950,000.00", "no quorum"] {
         // "no quorum" must NOT appear (a tick is set); everything else must.
         if expected == "no quorum" {
             assert!(!html.contains(expected));

@@ -9,7 +9,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 
-use crate::render::{css, page, CSP};
+use crate::render::{css, page, CSP, FAVICON};
 use crate::state::ExplorerState;
 
 pub struct App {
@@ -41,10 +41,19 @@ async fn stylesheet() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/css")], harden(), css())
 }
 
+async fn favicon() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "max-age=86400")],
+        harden(),
+        FAVICON,
+    )
+}
+
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/state", get(api_state))
         .route("/explorer.css", get(stylesheet))
+        .route("/favicon.svg", get(favicon))
         .with_state(app)
 }

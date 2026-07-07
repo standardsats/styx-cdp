@@ -27,7 +27,7 @@ fn the_explorer_tells_the_cascade_back() {
     let trace = lifecycle::run(&dep, &owner);
 
     // Index the whole chain the way the explorer does: no owner candidates at all.
-    let state = ExplorerState::new(IndexState::genesis(dep.node.genesis().unwrap()));
+    let state = ExplorerState::new(IndexState::genesis(dep.node.genesis().unwrap()), None);
     let notices = {
         let mut guard = state.index.write().unwrap();
         catch_up(&dep.node, &dep.ctx, &[], &mut guard).unwrap()

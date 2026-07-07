@@ -105,8 +105,12 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
     }
     html.push_str("</section>");
 
-    // Oracle recency, from the public relay.
-    html.push_str("<section class=\"card\"><h2>Oracles</h2><div class=\"slots\">");
+    // Oracle recency, name, and last price, from the public relay.
+    html.push_str("<section class=\"card\"><h2>Oracles</h2>");
+    if let Some(relay) = &v.relay {
+        html.push_str(&format!("<p class=\"muted\">quote relay: <code>{}</code></p>", esc(relay)));
+    }
+    html.push_str("<div class=\"slots\">");
     for (slot, age) in v.oracle_age_secs.iter().enumerate() {
         let (cls, text) = match age {
             Some(a) if *a <= 120 => ("ok", format!("{a}s ago")),
@@ -115,7 +119,11 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         };
         // The oracle's own name if it published one, else the bare slot.
         let label = v.oracle_name[slot].as_deref().map(esc).unwrap_or_else(|| format!("slot {slot}"));
-        html.push_str(&format!("<span class=\"slot {cls}\">{label}<br><b>{text}</b></span>"));
+        let price = match v.oracle_price[slot] {
+            Some(p) => format!("<br>${}", fmt(p as u64)),
+            None => String::new(),
+        };
+        html.push_str(&format!("<span class=\"slot {cls}\">{label}<br><b>{text}</b>{price}</span>"));
     }
     html.push_str("</div></section>");
 

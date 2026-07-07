@@ -69,7 +69,7 @@ fn synthetic() -> std::sync::Arc<ExplorerState> {
     index.vaults.insert(outpoint(0x11), vault(5_000_000, 62_500_000));
     index.vaults.insert(outpoint(0x12), vault(5_000_000, 45_000_000));
 
-    let state = ExplorerState::new(index);
+    let state = ExplorerState::new(index, None);
     let quote = SignedQuote { price: Price::new(100_000), sig: [0u8; 64] };
     state.set_tick(
         OracleTick::new(
@@ -141,7 +141,7 @@ fn band_boundaries_are_the_ladder_boundaries_in_sats() {
     for (n, coll, _) in cases {
         index.vaults.insert(outpoint(n), vault(coll));
     }
-    let state = ExplorerState::new(index);
+    let state = ExplorerState::new(index, None);
     let quote = SignedQuote { price: Price::new(100_000), sig: [0u8; 64] };
     state.set_tick(
         OracleTick::new(

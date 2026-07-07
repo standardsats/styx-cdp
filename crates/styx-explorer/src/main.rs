@@ -102,7 +102,7 @@ async fn quote_loop(
                 Ok(q) => {
                     let tip = state.index.read().unwrap_or_else(|e| e.into_inner()).height;
                     if book.insert(&q, BlockHeight::new(tip)).is_ok() {
-                        state.saw_slot(q.slot as usize, &q.name);
+                        state.saw_slot(q.slot as usize, &q.name, q.price);
                         for h in (tip.saturating_sub(8)..=tip).rev() {
                             if let Some(tick) = book.assemble_tick(BlockHeight::new(h)) {
                                 state.set_tick(tick);
@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         IndexState::at_height(anchor, node.block_hash(anchor)?)
     };
-    let state = ExplorerState::new(index);
+    let state = ExplorerState::new(index, net.nostr.relays.first().cloned());
 
     let poll = Duration::from_millis(cfg.poll_ms);
     {

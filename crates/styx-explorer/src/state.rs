@@ -25,16 +25,21 @@ pub struct ExplorerState {
     tick: RwLock<Option<(OracleTick, Instant)>>,
     slot_seen: Mutex<[Option<Instant>; 5]>,
     slot_name: Mutex<[Option<String>; 5]>,
+    slot_price: Mutex<[Option<u32>; 5]>,
+    /// The quote relay users can point a client at; shown on the page. From the config.
+    relay: Option<String>,
 }
 
 impl ExplorerState {
-    pub fn new(index: IndexState) -> std::sync::Arc<ExplorerState> {
+    pub fn new(index: IndexState, relay: Option<String>) -> std::sync::Arc<ExplorerState> {
         std::sync::Arc::new(ExplorerState {
             index: RwLock::new(index),
             events: Mutex::new(VecDeque::new()),
             tick: RwLock::new(None),
             slot_seen: Mutex::new([None; 5]),
             slot_name: Mutex::new([const { None }; 5]),
+            slot_price: Mutex::new([None; 5]),
+            relay,
         })
     }
 
@@ -59,12 +64,15 @@ impl ExplorerState {
             .map(|(t, _)| t.clone())
     }
 
-    pub fn saw_slot(&self, slot: usize, name: &str) {
+    pub fn saw_slot(&self, slot: usize, name: &str, price: u32) {
         if let Some(s) = self.slot_seen.lock().unwrap_or_else(|e| e.into_inner()).get_mut(slot) {
             *s = Some(Instant::now());
         }
         if let Some(n) = self.slot_name.lock().unwrap_or_else(|e| e.into_inner()).get_mut(slot) {
             *n = (!name.is_empty()).then(|| name.to_string());
+        }
+        if let Some(p) = self.slot_price.lock().unwrap_or_else(|e| e.into_inner()).get_mut(slot) {
+            *p = Some(price);
         }
     }
 
@@ -104,6 +112,7 @@ impl ExplorerState {
             .collect();
         let ages = *self.slot_seen.lock().unwrap_or_else(|e| e.into_inner());
         let names = self.slot_name.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let prices = *self.slot_price.lock().unwrap_or_else(|e| e.into_inner());
         View {
             height: index.height,
             protocol,
@@ -116,6 +125,8 @@ impl ExplorerState {
             events,
             oracle_age_secs: ages.map(|s| s.map(|at| at.elapsed().as_secs())),
             oracle_name: names,
+            oracle_price: prices,
+            relay: self.relay.clone(),
         }
     }
 }
@@ -201,4 +212,8 @@ pub struct View {
     pub oracle_age_secs: [Option<u64>; 5],
     /// Each slot's self-declared name from its latest quote; None = unnamed or never seen.
     pub oracle_name: [Option<String>; 5],
+    /// Each slot's last published price (USD); None = never seen.
+    pub oracle_price: [Option<u32>; 5],
+    /// The quote relay address to show, if configured.
+    pub relay: Option<String>,
 }

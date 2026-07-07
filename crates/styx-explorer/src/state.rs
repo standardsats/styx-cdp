@@ -103,6 +103,7 @@ impl ExplorerState {
             .iter()
             .map(|(op, v)| VaultView {
                 outpoint: op.to_string(),
+                txid: op.txid.to_string(),
                 debt_units: v.debt.raw(),
                 collateral_sats: v.value.raw(),
                 last_height: v.last_height.raw(),
@@ -209,6 +210,8 @@ pub struct TickView {
 #[derive(Serialize)]
 pub struct VaultView {
     pub outpoint: String,
+    /// The txid alone, for the public-explorer link.
+    pub txid: String,
     pub debt_units: u64,
     pub collateral_sats: u64,
     pub last_height: u32,

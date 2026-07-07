@@ -85,8 +85,10 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
         for vt in &v.vaults {
             let cr = vt.cr_percent.map(|c| format!("{c}%")).unwrap_or_else(|| "-".into());
             html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>\
+                "<tr><td><a href=\"https://liquid.network/testnet/tx/{}\" target=\"_blank\" \
+                 rel=\"noopener\">{}</a></td><td>{}</td><td>{}</td><td>{}</td>\
                  <td><span class=\"band {}\">{}</span></td><td>{}</td></tr>",
+                esc(&vt.txid),
                 esc(&short(&vt.outpoint)),
                 fmt(vt.debt_units),
                 fmt(vt.collateral_sats),

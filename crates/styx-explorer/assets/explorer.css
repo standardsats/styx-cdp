@@ -80,3 +80,5 @@ td { color: var(--ink); padding: 0.3rem 0.5rem 0.3rem 0; border-top: 1px solid v
        font-family: var(--mono); text-decoration: none; }
 .cta:hover { background: rgba(200, 164, 92, 0.2); }
 .muted { color: var(--muted); font-size: 0.85rem; }
+a { color: var(--gold); }
+a:hover { text-decoration: underline; }

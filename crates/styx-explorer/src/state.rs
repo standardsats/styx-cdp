@@ -81,10 +81,22 @@ impl ExplorerState {
         let tick = self.tick();
         let hi = tick.as_ref().map(|t| t.price_range().1);
         let index = self.index.read().unwrap_or_else(|e| e.into_inner());
-        let protocol = index.protocol().map(|p| ProtocolView {
-            pot_units: p.pot.value.raw(),
-            reserve_sats: p.reserve.value.raw(),
-            issuer_anchor: p.issuer.state.last_mint_height.raw(),
+        let protocol = index.protocol().map(|p| {
+            let singleton = |name: &'static str, op: &styx_core::elements::OutPoint| SingletonView {
+                name,
+                outpoint: op.to_string(),
+                txid: op.txid.to_string(),
+            };
+            ProtocolView {
+                pot_units: p.pot.value.raw(),
+                reserve_sats: p.reserve.value.raw(),
+                issuer_anchor: p.issuer.state.last_mint_height.raw(),
+                singletons: vec![
+                    singleton("pot", &p.pot.outpoint),
+                    singleton("reserve", &p.reserve.outpoint),
+                    singleton("issuer", &p.issuer.outpoint),
+                ],
+            }
         });
         let mut vaults: Vec<VaultView> = index
             .vaults
@@ -174,6 +186,17 @@ pub struct ProtocolView {
     pub pot_units: u64,
     pub reserve_sats: u64,
     pub issuer_anchor: u32,
+    /// The protocol's on-chain singleton outputs, for cross-checking against a public explorer.
+    pub singletons: Vec<SingletonView>,
+}
+
+#[derive(Serialize)]
+pub struct SingletonView {
+    pub name: &'static str,
+    /// The full `txid:vout` for display.
+    pub outpoint: String,
+    /// The txid alone, for the public-explorer link.
+    pub txid: String,
 }
 
 #[derive(Serialize)]

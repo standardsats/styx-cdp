@@ -105,6 +105,26 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
     }
     html.push_str("</section>");
 
+    // The protocol singletons, linked to the public explorer so anyone can confirm the
+    // indexer is tracking the real on-chain outputs.
+    if let Some(p) = &v.protocol {
+        html.push_str(
+            "<section class=\"card\"><h2>Singletons</h2>\
+             <p class=\"muted\">the protocol's on-chain outputs - open each on \
+             liquid.network to verify</p><table><tbody>",
+        );
+        for s in &p.singletons {
+            html.push_str(&format!(
+                "<tr><td>{}</td><td><a href=\"https://liquid.network/testnet/tx/{}\" \
+                 target=\"_blank\" rel=\"noopener\">{}</a></td></tr>",
+                s.name,
+                esc(&s.txid),
+                esc(&short(&s.outpoint)),
+            ));
+        }
+        html.push_str("</tbody></table></section>");
+    }
+
     // Oracle recency, name, and last price, from the public relay.
     html.push_str("<section class=\"card\"><h2>Oracles</h2>");
     if let Some(relay) = &v.relay {

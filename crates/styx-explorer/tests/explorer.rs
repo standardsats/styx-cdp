@@ -108,8 +108,18 @@ fn the_page_renders_and_stays_internal() {
             assert!(html.contains(expected), "the page lost `{expected}`");
         }
     }
-    assert!(!html.contains("http://") && !html.contains("https://"), "no external URL without a CTA");
     assert!(!html.contains("<script"), "the explorer ships no script");
+    assert!(!html.contains("http://"), "no plaintext external URL");
+    // The singleton rows link out to the public explorer so anyone can verify the tracked
+    // outputs. Those click-through links are the only external references on a CTA-less page;
+    // nothing loads cross-origin (the CSP forbids subresources), so the viewer's IP reaches
+    // liquid.network only on a deliberate click.
+    for (i, _) in html.match_indices("https://") {
+        assert!(
+            html[i..].starts_with("https://liquid.network/testnet/tx/"),
+            "unexpected external URL on the page"
+        );
+    }
 
     // The one sanctioned external reference: the operator-configured CTA, escaped.
     let with_cta = page(&state.view(), Some("https://example.org/styx-app\"><script>"));

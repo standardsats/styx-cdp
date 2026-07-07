@@ -62,7 +62,7 @@ oracles directly (quotes flow over the relay), and the oracle admin ports stay p
 ## 2. Oracle hosts (0..4)
 
 Each oracle machine runs a follower node and one daemon. Do all five, one exchange per slot
-(coinbase / binance / kraken / bitstamp / bitfinex - genuinely independent sources).
+(coinbase / binance / kraken / okx / bitfinex - genuinely independent sources).
 
 1. Follower node; wait for sync; confirm `getblockhash 0` matches the federation.
 2. Generate the oracle's keys and keep them on the box:

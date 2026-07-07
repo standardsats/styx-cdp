@@ -36,6 +36,8 @@ pub enum Backend {
     Kraken,
     Bitstamp,
     Bitfinex,
+    /// BTC/USDT: a dollar proxy.
+    Okx,
 }
 
 impl std::str::FromStr for Backend {
@@ -47,8 +49,10 @@ impl std::str::FromStr for Backend {
             "kraken" => Ok(Backend::Kraken),
             "bitstamp" => Ok(Backend::Bitstamp),
             "bitfinex" => Ok(Backend::Bitfinex),
+            "okx" => Ok(Backend::Okx),
             other => Err(format!(
-                "unknown feed backend {other} (coinbase / binance / kraken / bitstamp / bitfinex)"
+                "unknown feed backend {other} \
+                 (coinbase / binance / kraken / bitstamp / bitfinex / okx)"
             )),
         }
     }
@@ -62,6 +66,7 @@ impl Backend {
             Backend::Kraken => "kraken",
             Backend::Bitstamp => "bitstamp",
             Backend::Bitfinex => "bitfinex",
+            Backend::Okx => "okx",
         }
     }
 
@@ -73,6 +78,7 @@ impl Backend {
             Backend::Kraken => "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
             Backend::Bitstamp => "https://www.bitstamp.net/api/v2/ticker/btcusd/",
             Backend::Bitfinex => "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD",
+            Backend::Okx => "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT",
         }
     }
 
@@ -112,6 +118,11 @@ impl Backend {
                 .map_err(|_| shape("last not a number"))?,
             // An array ticker: [bid, bid_size, ask, ask_size, chg, chg_rel, LAST, vol, hi, lo]
             Backend::Bitfinex => json()?[6].as_f64().ok_or_else(|| shape("ticker[6] missing"))?,
+            Backend::Okx => json()?["data"][0]["last"]
+                .as_str()
+                .ok_or_else(|| shape("data[0].last missing"))?
+                .parse()
+                .map_err(|_| shape("data[0].last not a number"))?,
         };
         sane(self.name(), raw)
     }
@@ -170,7 +181,7 @@ mod tests {
 
     #[test]
     fn every_exchange_shape_parses() {
-        let cases: [(Backend, &str, u32); 5] = [
+        let cases: [(Backend, &str, u32); 6] = [
             (
                 Backend::Coinbase,
                 r#"{"data":{"amount":"104250.335","base":"BTC","currency":"USD"}}"#,
@@ -190,6 +201,11 @@ mod tests {
             (
                 Backend::Bitfinex,
                 r#"[104200.0,5.5,104300.0,4.2,-100.0,-0.001,104250.0,1234.5,105000.0,103000.0]"#,
+                104250,
+            ),
+            (
+                Backend::Okx,
+                r#"{"code":"0","msg":"","data":[{"instId":"BTC-USDT","last":"104249.9","askPx":"104250","bidPx":"104249"}]}"#,
                 104250,
             ),
         ];
@@ -230,7 +246,7 @@ mod tests {
 
     #[test]
     fn backend_names_round_trip() {
-        for name in ["coinbase", "binance", "kraken", "bitstamp", "bitfinex"] {
+        for name in ["coinbase", "binance", "kraken", "bitstamp", "bitfinex", "okx"] {
             let b: Backend = name.parse().unwrap();
             assert_eq!(b.name(), name);
         }

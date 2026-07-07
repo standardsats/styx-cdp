@@ -23,7 +23,7 @@ poll_ms = 500
 # exchange per slot keeps the quorum's five sources genuinely independent. Without this
 # section the oracle stays in manual mode: price_usd + overrides only.
 [feed]
-backend = "coinbase"   # coinbase / binance / kraken / bitstamp / bitfinex
+backend = "coinbase"   # coinbase / binance / kraken / bitstamp / bitfinex / okx
 poll_ms = 5000
 # url = "http://..."   # endpoint override for tests and closed networks
 # max_age_secs = 60     # staleness gate: stop publishing when the backend is silent this

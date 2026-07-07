@@ -13,8 +13,14 @@ use styx_oracle::feed::{Backend, FeedError, HttpFeed, PriceSource};
 #[tokio::test]
 #[ignore = "needs egress to the public exchanges"]
 async fn every_reachable_exchange_parses_today() {
-    let backends =
-        [Backend::Coinbase, Backend::Binance, Backend::Kraken, Backend::Bitstamp, Backend::Bitfinex];
+    let backends = [
+        Backend::Coinbase,
+        Backend::Binance,
+        Backend::Kraken,
+        Backend::Bitstamp,
+        Backend::Bitfinex,
+        Backend::Okx,
+    ];
     let mut validated = 0;
     for backend in backends {
         let mut feed = HttpFeed::new(backend, None).unwrap();
@@ -30,5 +36,5 @@ async fn every_reachable_exchange_parses_today() {
         }
     }
     assert!(validated > 0, "no exchange reachable: the run validated nothing");
-    println!("validated {validated}/5 backends");
+    println!("validated {validated}/6 backends");
 }

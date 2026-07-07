@@ -33,6 +33,7 @@ pub mod domain;
 pub mod encode;
 pub mod leaves;
 pub mod math;
+pub mod net;
 pub mod oracle;
 pub mod params;
 pub mod units;

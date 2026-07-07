@@ -81,6 +81,16 @@ impl Node {
         self.block_hash(0)
     }
 
+    /// The chain the node runs, e.g. "liquidtestnet" or "elementsregtest". Drives the
+    /// address encoding covenant addresses must use to be accepted by the node's RPC.
+    pub fn chain(&self) -> Result<String, NodeError> {
+        let info = self.rpc("getblockchaininfo", &[])?;
+        info["chain"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or(NodeError::Shape { context: "getblockchaininfo chain" })
+    }
+
     pub fn block_hash(&self, height: u32) -> Result<BlockHash, NodeError> {
         let s = self.rpc("getblockhash", &[height.into()])?;
         BlockHash::from_str(s.as_str().unwrap_or(""))

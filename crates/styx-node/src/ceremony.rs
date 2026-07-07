@@ -55,7 +55,9 @@ pub fn ceremony(
     // power.
     let ih0 = node.height()?;
     let issuer_state = IssuerState { last_mint_height: BlockHeight::new(ih0) };
-    let net = &styx_core::elements::AddressParams::ELEMENTS;
+    // Covenant addresses go to the node as rawissueasset `asset_address`; they must carry
+    // this chain's HRP (tex on liquidtestnet, ert on regtest) or the node rejects them.
+    let net = styx_core::net::address_params(&node.chain()?);
     let pot_addr = Address::from_script(&ctx.artifacts.pot_spk(), None, net)
         .ok_or(CeremonyError::Shape("pot address"))?;
     let issuer_addr = Address::from_script(&ctx.artifacts.issuer_spk(&issuer_state), None, net)

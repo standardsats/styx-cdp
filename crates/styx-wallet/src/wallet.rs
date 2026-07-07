@@ -159,16 +159,7 @@ pub struct Wallet {
     addr_params: &'static AddressParams,
 }
 
-/// The address encoding for a chain name. Scripts and spk derivation are
-/// network-independent; only the human-facing encoding differs.
-pub fn address_params(chain: &str) -> &'static AddressParams {
-    match chain {
-        "liquidv1" => &AddressParams::LIQUID,
-        "liquidtestnet" => &AddressParams::LIQUID_TESTNET,
-        // Regtest and custom private chains (styxnet) use the elements defaults.
-        _ => &AddressParams::ELEMENTS,
-    }
-}
+pub use styx_core::net::address_params;
 
 impl Wallet {
     /// Load everything a command needs: styxnet.toml -> params -> artifacts, the node (its

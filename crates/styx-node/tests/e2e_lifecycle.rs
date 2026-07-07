@@ -10,7 +10,7 @@ use styx_core::elements::OutPoint;
 use styx_core::units::Obol;
 use styx_core::units::Sats;
 use styx_node::client::{op_true, FEE};
-use styx_node::regtest::{deploy, SUPPLY};
+use styx_node::regtest::{deploy, deploy_fragmented, SUPPLY};
 use styx_node::scan::scan_protocol;
 use styx_node::{lifecycle, BroadcastError};
 use styx_pset::build;
@@ -39,6 +39,19 @@ fn full_lifecycle_smoke() {
     assert_eq!(scanned.pot, last.protocol.pot);
     assert_eq!(scanned.reserve, last.protocol.reserve);
     assert_eq!(scanned.issuer, last.protocol.issuer);
+}
+
+#[test]
+#[ignore = "needs ELEMENTSD_EXE (run inside nix develop)"]
+fn ceremony_funds_a_reserve_from_a_fragmented_wallet() {
+    // Faucet drips leave the wallet with many small coins and no single coin big enough for
+    // the reserve. Multi-coin selection must fund the whole ceremony anyway; the old
+    // biggest-coin split failed here with bad-txns-vout-negative.
+    let dep = deploy_fragmented(2_000_000);
+    assert_eq!(dep.protocol.reserve.value, Sats::new(2_000_000));
+    let scanned = scan_protocol(&dep.node, &dep.ctx, dep.protocol.issuer.state).expect("scan");
+    assert_eq!(scanned.reserve, dep.protocol.reserve);
+    assert_eq!(scanned.pot, dep.protocol.pot);
 }
 
 #[test]

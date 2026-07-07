@@ -27,10 +27,11 @@ fn keypair(secret: u8) -> zkp::Keypair {
     zkp::Keypair::from_seckey_slice(styx_core::secp(), &sk).unwrap()
 }
 
-/// Launch the node and run the deployment ceremony.
-pub fn deploy(reserve_seed: u64) -> Deployment {
+/// Launch a node with `initialfreecoins` genesis coins and a loaded, rescanned wallet.
+fn launch(initialfreecoins: u64) -> (ElementsD, Node) {
     let mut conf = elementsd::Conf::new(None);
-    let initial = "-initialfreecoins=210000000000";
+    let initial: &'static str =
+        Box::leak(format!("-initialfreecoins={initialfreecoins}").into_boxed_str());
     match conf.0.args.iter().position(|a| a.starts_with("-initialfreecoins=")) {
         Some(i) => conf.0.args[i] = initial,
         None => conf.0.args.push(initial),
@@ -43,7 +44,10 @@ pub fn deploy(reserve_seed: u64) -> Deployment {
     base.rpc("createwallet", &["wallet".into()]).expect("createwallet");
     let node = base.for_wallet("wallet").expect("wallet client");
     node.rpc("rescanblockchain", &[]).expect("rescan");
+    (daemon, node)
+}
 
+fn run(daemon: ElementsD, node: Node, reserve_seed: u64) -> Deployment {
     let oracle_keys = [keypair(7), keypair(8), keypair(9), keypair(101), keypair(102)];
     let (ctx, protocol) = ceremony(
         &node,
@@ -53,6 +57,44 @@ pub fn deploy(reserve_seed: u64) -> Deployment {
     )
     .expect("ceremony");
     Deployment { daemon, node, ctx, protocol, oracle_keys }
+}
+
+/// Launch the node and run the deployment ceremony against one large genesis coin.
+pub fn deploy(reserve_seed: u64) -> Deployment {
+    let (daemon, node) = launch(210_000_000_000);
+    run(daemon, node, reserve_seed)
+}
+
+/// Deploy against a wallet fragmented into coins too small to fund the reserve individually,
+/// the liquidtestnet faucet-drip case: the ceremony must select across several coins.
+pub fn deploy_fragmented(reserve_seed: u64) -> Deployment {
+    let (daemon, node) = launch(10_000_000);
+    fragment(&node, 9);
+    run(daemon, node, reserve_seed)
+}
+
+/// Split the wallet's single genesis coin into `n` equal coins with no large change left, so
+/// no one coin can cover a reserve bigger than a single piece.
+fn fragment(node: &Node, n: u64) {
+    use elementsd::bitcoincore_rpc::jsonrpc::serde_json::json;
+    let (op, sats, _) = node.biggest_coin().expect("coin");
+    let each = (sats - crate::client::FEE_RPC) / n;
+    let addrs: Vec<_> = (0..n).map(|_| node.new_address().expect("addr")).collect();
+    let mut outs: Vec<(String, u64)> = addrs.iter().map(|a| (a.to_string(), each)).collect();
+    outs.push(("fee".into(), sats - each * n)); // the remainder pays the fee
+    let raw = node
+        .rpc(
+            "createrawtransaction",
+            &[
+                json!([{ "txid": op.txid.to_string(), "vout": op.vout }]),
+                crate::client::out_array(&outs),
+            ],
+        )
+        .expect("createrawtransaction");
+    let signed = node.rpc("signrawtransactionwithwallet", &[raw]).expect("sign");
+    let hex = signed["hex"].as_str().expect("signed hex").to_string();
+    node.rpc("sendrawtransaction", &[hex.into()]).expect("broadcast");
+    node.mine().expect("confirm fragmentation");
 }
 
 impl Deployment {

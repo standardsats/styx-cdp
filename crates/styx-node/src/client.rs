@@ -18,6 +18,22 @@ use crate::{BroadcastError, NodeError};
 pub const FEE: Sats = Sats::new(10_000);
 /// The wallet-level fee for setup transactions.
 pub const FEE_RPC: u64 = 100_000;
+/// Size of each issuance prevout the ceremony creates. Only large enough that the two of
+/// them cover the issuance transaction's own `FEE_RPC` fee with change to spare.
+pub const PREVOUT: u64 = 100_000;
+
+/// Change left after spending `spend` from a coin worth `have` sats, or a clear funding
+/// error instead of a u64 underflow into a negative output. `what` names the call site.
+/// These setup transactions spend one wallet coin, so a coin too small for the outputs plus
+/// fee has to fail before broadcast, not wrap into an absurd amount the node rejects.
+pub(crate) fn change_after(have: u64, spend: u64, what: &str) -> Result<u64, NodeError> {
+    have.checked_sub(spend).ok_or_else(|| {
+        NodeError::Funding(format!(
+            "{what}: wallet coin has {have} sats but the transaction needs {spend}; \
+             fund the wallet with a larger single coin"
+        ))
+    })
+}
 
 /// How a broadcast gets confirmed: by mining the block ourselves (regtest, a private
 /// producer) or by waiting for whoever makes blocks on this chain (the testnet federation).
@@ -224,6 +240,73 @@ impl Node {
         ))
     }
 
+    /// Spendable coins of the policy asset, largest first. Filtering by asset keeps L-BTC
+    /// funding from ever selecting an issued-asset coin.
+    pub fn policy_coins(&self, policy: AssetId) -> Result<Vec<(OutPoint, u64)>, NodeError> {
+        let u = self.rpc("listunspent", &[])?;
+        let list = u.as_array().ok_or(NodeError::Shape { context: "listunspent" })?;
+        let mut coins: Vec<(OutPoint, u64)> = list
+            .iter()
+            .filter_map(|c| {
+                if AssetId::from_str(c["asset"].as_str()?).ok()? != policy {
+                    return None;
+                }
+                let txid = Txid::from_str(c["txid"].as_str()?).ok()?;
+                let vout = c["vout"].as_u64()? as u32;
+                let sats = (c["amount"].as_f64()? * 1e8).round() as u64;
+                Some((OutPoint::new(txid, vout), sats))
+            })
+            .collect();
+        coins.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(coins)
+    }
+
+    /// Total spendable policy value across the whole wallet.
+    pub fn spendable(&self, policy: AssetId) -> Result<u64, NodeError> {
+        Ok(self.policy_coins(policy)?.iter().map(|(_, v)| v).sum())
+    }
+
+    /// Select coins (largest first) whose total covers `need`, or a clear funding error.
+    fn select(&self, policy: AssetId, need: u64, what: &str) -> Result<(Vec<OutPoint>, u64), NodeError> {
+        let mut picked = Vec::new();
+        let mut total = 0u64;
+        for (op, sats) in self.policy_coins(policy)? {
+            picked.push(op);
+            total += sats;
+            if total >= need {
+                return Ok((picked, total));
+            }
+        }
+        Err(NodeError::Funding(format!(
+            "{what}: wallet holds {total} spendable sats across {} coin(s) but the transaction \
+             needs {need}; fund the wallet with more",
+            picked.len()
+        )))
+    }
+
+    /// Pay `outs` (spk, sats) in one transaction, funding it by selecting policy coins across
+    /// the whole wallet and adding one change output and the fee. This is the flexible
+    /// replacement for the old single-coin split: coin structure no longer bounds what the
+    /// ceremony can fund.
+    fn pay(&self, policy: AssetId, outs: &[(Script, u64)], what: &str) -> Result<Txid, NodeError> {
+        use styx_pset::layout::{fee_out, txin, txout};
+        let spend = outs.iter().map(|(_, v)| *v).sum::<u64>() + FEE.raw();
+        let (inputs, total) = self.select(policy, spend, what)?;
+        let mut output: Vec<_> = outs.iter().map(|(spk, v)| txout(*v, spk.clone(), policy)).collect();
+        let change = total - spend; // total >= spend by select
+        if change > 0 {
+            output.push(txout(change, self.new_address()?.script_pubkey(), policy));
+        }
+        output.push(fee_out(FEE, policy));
+        let tx = Transaction {
+            version: 2,
+            lock_time: styx_core::elements::LockTime::ZERO,
+            input: inputs.into_iter().map(txin).collect(),
+            output,
+        };
+        self.sign_and_send_hex(serialize_hex(&tx).into())
+    }
+
     /// Sign with the node wallet and broadcast. No mining and no confirmation: spenders of
     /// the outputs may chain in the mempool; anything that needs confirmed visibility
     /// (scans, the indexer) calls `confirm_outpoint` with the chain-appropriate mode.
@@ -239,25 +322,21 @@ impl Node {
         }
     }
 
-    /// Split the biggest wallet coin in two (the two issuance prevouts).
-    pub fn split_two(&self) -> Result<(OutPoint, u64, OutPoint, u64), NodeError> {
-        let (op, sats, _) = self.biggest_coin()?;
+    /// Create the two issuance prevouts, funded by selecting policy coins across the whole
+    /// wallet. Each is a fixed `PREVOUT`, so their size no longer depends on the wallet's
+    /// coin structure and neither does what the issuance can spend.
+    pub fn split_two(&self, policy: AssetId) -> Result<(OutPoint, u64, OutPoint, u64), NodeError> {
         let (a, b) = (self.new_address()?, self.new_address()?);
-        let half = sats / 2;
-        let rest = sats - half - FEE_RPC;
-        let raw = self.rpc(
-            "createrawtransaction",
-            &[
-                json!([{ "txid": op.txid.to_string(), "vout": op.vout }]),
-                out_array(&[(a.to_string(), half), (b.to_string(), rest), ("fee".into(), FEE_RPC)]),
-            ],
+        let txid = self.pay(
+            policy,
+            &[(a.script_pubkey(), PREVOUT), (b.script_pubkey(), PREVOUT)],
+            "split_two",
         )?;
-        let txid = self.sign_and_send_hex(raw)?;
         Ok((
-            self.find(txid, &a.script_pubkey(), half)?,
-            half,
-            self.find(txid, &b.script_pubkey(), rest)?,
-            rest,
+            self.find(txid, &a.script_pubkey(), PREVOUT)?,
+            PREVOUT,
+            self.find(txid, &b.script_pubkey(), PREVOUT)?,
+            PREVOUT,
         ))
     }
 
@@ -266,7 +345,7 @@ impl Node {
     pub fn fund_optrue(&self, policy: AssetId, values: &[u64]) -> Result<Vec<OutPoint>, NodeError> {
         use styx_pset::layout::{fee_out, txin, txout};
         let (op, sats, _) = self.biggest_coin()?;
-        let change = sats - (values.iter().sum::<u64>() + FEE.raw());
+        let change = change_after(sats, values.iter().sum::<u64>() + FEE.raw(), "fund_optrue")?;
         let mut output: Vec<_> = values.iter().map(|v| txout(*v, op_true(), policy)).collect();
         output.push(txout(change, self.new_address()?.script_pubkey(), policy));
         output.push(fee_out(FEE, policy));
@@ -292,30 +371,21 @@ impl Node {
         spk: &Script,
         value: u64,
     ) -> Result<OutPoint, NodeError> {
-        use styx_pset::layout::{fee_out, txin, txout};
-        let mut coin = self.biggest_coin();
+        let mut last = None;
         for _ in 0..120 {
-            match &coin {
-                Err(NodeError::Shape { context }) if *context == "listunspent empty" => {
+            match self.pay(policy, &[(spk.clone(), value)], "fund_address") {
+                Ok(txid) => return self.find(txid, spk, value),
+                // Coins may not be visible yet (the change of a just-broadcast tx awaits a
+                // block); wait, bounded, and retry. A genuine shortfall surfaces as the last
+                // funding error once the wait runs out.
+                Err(e @ NodeError::Funding(_)) => {
+                    last = Some(e);
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    coin = self.biggest_coin();
                 }
-                _ => break,
+                Err(e) => return Err(e),
             }
         }
-        let (op, sats, _) = coin?;
-        let tx = Transaction {
-            version: 2,
-            lock_time: styx_core::elements::LockTime::ZERO,
-            input: vec![txin(op)],
-            output: vec![
-                txout(value, spk.clone(), policy),
-                txout(sats - value - FEE.raw(), self.new_address()?.script_pubkey(), policy),
-                fee_out(FEE, policy),
-            ],
-        };
-        let txid = self.sign_and_send_hex(serialize_hex(&tx).into())?;
-        self.find(txid, spk, value)
+        Err(last.unwrap_or(NodeError::Shape { context: "fund_address: no coins" }))
     }
 
     /// Merge op_true OBOL UTXOs into one, the fee paid from a wallet coin.
@@ -328,6 +398,7 @@ impl Node {
         use styx_pset::layout::{fee_out, txin, txout};
         let total: u64 = parts.iter().map(|(_, v)| *v).sum();
         let (wc, wsats, _) = self.biggest_coin()?;
+        let change = change_after(wsats, FEE.raw(), "merge_obol")?;
         let mut input = vec![txin(wc)];
         input.extend(parts.iter().map(|(o, _)| txin(*o)));
         let tx = Transaction {
@@ -336,7 +407,7 @@ impl Node {
             input,
             output: vec![
                 txout(total, op_true(), obol),
-                txout(wsats - FEE.raw(), self.new_address()?.script_pubkey(), policy),
+                txout(change, self.new_address()?.script_pubkey(), policy),
                 fee_out(FEE, policy),
             ],
         };

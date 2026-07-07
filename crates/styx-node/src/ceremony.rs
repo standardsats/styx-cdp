@@ -15,7 +15,7 @@ use styx_core::params::Params;
 use styx_core::units::{BlockHeight, Obol, Sats};
 use styx_pset::Ctx;
 
-use crate::client::{out_array, Node, FEE_RPC};
+use crate::client::{change_after, out_array, Node, FEE, FEE_RPC, PREVOUT};
 use crate::{BroadcastError, NodeError};
 
 /// The fixed OBOL supply the ceremony issues: 1M OBOL in atomic units.
@@ -41,7 +41,19 @@ pub fn ceremony(
 ) -> Result<(Ctx, ProtocolState), CeremonyError> {
     let genesis = node.genesis()?;
     let (_, _, policy) = node.biggest_coin()?;
-    let (issue_in, issue_sats, token_in, token_sats) = node.split_two()?;
+    // Preflight: fail before any broadcast if the whole wallet can't cover the reserve, the
+    // two issuance prevouts, and the three setup fees. A mid-ceremony shortfall would leave
+    // an orphaned issuance on chain.
+    let need = reserve_seed + 2 * PREVOUT + FEE_RPC + 2 * FEE.raw();
+    let have = node.spendable(policy)?;
+    if have < need {
+        return Err(NodeError::Funding(format!(
+            "ceremony preflight: wallet has {have} spendable sats but needs about {need} \
+             (reserve {reserve_seed} + two prevouts + fees); fund the wallet with more"
+        ))
+        .into());
+    }
+    let (issue_in, issue_sats, token_in, token_sats) = node.split_two(policy)?;
     let contract = ContractHash::from_byte_array([0u8; 32]);
     let obol = AssetId::new_issuance(issue_in, contract);
     let issuer_token = AssetId::new_issuance(token_in, contract);
@@ -62,15 +74,13 @@ pub fn ceremony(
         .ok_or(CeremonyError::Shape("pot address"))?;
     let issuer_addr = Address::from_script(&ctx.artifacts.issuer_spk(&issuer_state), None, net)
         .ok_or(CeremonyError::Shape("issuer address"))?;
+    let issue_change = change_after(issue_sats + token_sats, FEE_RPC, "issuance change")?;
     let raw = node.rpc(
         "createrawtransaction",
         &[
             json!([{ "txid": issue_in.txid.to_string(), "vout": issue_in.vout },
                    { "txid": token_in.txid.to_string(), "vout": token_in.vout }]),
-            out_array(&[
-                ("fee".into(), FEE_RPC),
-                (node.new_address()?.to_string(), issue_sats + token_sats - FEE_RPC),
-            ]),
+            out_array(&[("fee".into(), FEE_RPC), (node.new_address()?.to_string(), issue_change)]),
         ],
     )?;
     let detail = json!([

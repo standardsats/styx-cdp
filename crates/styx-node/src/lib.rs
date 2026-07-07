@@ -23,6 +23,8 @@ pub enum NodeError {
     Rpc { method: String, message: String },
     #[error("unexpected rpc shape in {context}")]
     Shape { context: &'static str },
+    #[error("wallet funding: {0}")]
+    Funding(String),
 }
 
 #[derive(Debug, thiserror::Error)]

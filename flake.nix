@@ -5,8 +5,9 @@
     # Recent nixpkgs for the Rust toolchain. The dependency tree needs rustc >= 1.88
     # (ar_archive_writer, home); nixos-25.11 ships 1.91. Also provides cc.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    # Pinned to the exact rev SimplicityHL builds its Simplicity elementsd from, so
-    # the derivation reuses the already-built store path instead of recompiling.
+    # Base package set for the elementsd derivation we override in nix/elementsd-simplicity.nix.
+    # We build Elements from a release tag now (Simplicity is upstream), so this no longer has
+    # to match SimplicityHL's rev; it could fold into nixpkgs above, kept separate for now.
     nixpkgs-elements.url = "github:NixOS/nixpkgs/59e618d90c065f55ae48446f307e8c09565d5ab0";
   };
 

@@ -1,21 +1,24 @@
-# Simplicity-capable elementsd, built from the ElementsProject `simplicity` branch.
+# Simplicity-capable elementsd. Simplicity is now in the mainline Elements release, so we
+# build from a release tag instead of the old `simplicity` branch. The pre-2025 nodes on
+# that branch reject the testnet's April blocks; this tag accepts them.
 #
-# Vendored verbatim from SimplicityHL (bitcoind-tests/elementsd-simplicity.nix). When
-# this `rev` is evaluated under the nixpkgs pin in ../flake.nix (nixos-24.11, the same
-# rev SimplicityHL locks), the derivation hashes to the store path that is already
-# built, so `nix develop` reuses it instead of recompiling from source.
+# This no longer matches SimplicityHL's cached store path, so the first build compiles
+# Elements from source (slow, ~once per rev).
 #
-# To bump: update `rev` to the latest `simplicity` branch commit, set `sha256` to the
-# placeholder below, rebuild once, and paste the expected hash nix reports.
+# To bump: update `rev`/`version`, set `sha256` to the fake below, build once, and paste
+# the expected hash nix reports.
 { pkgs }:
 pkgs.elementsd.overrideAttrs (_: {
-  version = "liquid-testnet-2024-10-08";
+  version = "liquid-testnet-23.3.4rc1";
   src = pkgs.fetchFromGitHub {
     owner = "ElementsProject";
     repo = "elements";
-    rev = "f957d3cde17c85afb18c6747f9c0b4fcb599f19a"; # `simplicity` branch
-    sha256 = "sha256-XzdfbrQ7s4PfM5N00oP1jo5BNmD4WUMUe79QsTxsL4s=";
+    rev = "7fd0885771cbe2ddba8a8e48cfa150390b5e5cbc"; # tag liquid-testnet-23.3.4rc1
+    sha256 = "sha256-FAgSPWsZnqbo8XDaareMYIhrqjPTpkWzBweDwciiYtc=";
   };
+  # The base derivation carries the mapport.cpp/miniupnpc patch; this tag already has it
+  # upstream, so it no longer applies. Drop it.
+  patches = [ ];
   withWallet = true;
   withGui = false;
   doCheck = false;

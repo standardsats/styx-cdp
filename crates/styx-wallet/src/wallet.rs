@@ -278,7 +278,10 @@ impl Wallet {
 
     /// Sign every input paying the funding spk (SIGHASH_ALL key-path) and broadcast. The
     /// caller mines (or waits for the producer); the wallet never assumes mining rights.
-    pub fn sign_and_broadcast(&self, plan: &TxPlan) -> Result<Txid, WalletError> {
+    /// Sign a plan's funding inputs and finalize it to a broadcastable transaction, WITHOUT
+    /// sending. Split from `sign_and_broadcast` so a caller can measure the signed vsize (the
+    /// Simplicity witness is only present here) before deciding the fee.
+    pub fn sign(&self, plan: &TxPlan) -> Result<Transaction, WalletError> {
         let mut pset = to_pset(&self.ctx, plan)?;
         let ours = self.funding_spk();
         for (i, u) in plan.in_utxos.iter().enumerate() {
@@ -286,8 +289,21 @@ impl Wallet {
                 sign_funding(&self.ctx, plan, &mut pset, i, &self.funding)?;
             }
         }
-        let tx = finalize_pset(&self.ctx, plan, &pset)?;
-        Ok(self.node.send(&tx)?)
+        Ok(finalize_pset(&self.ctx, plan, &pset)?)
+    }
+
+    pub fn broadcast(&self, tx: &Transaction) -> Result<Txid, WalletError> {
+        Ok(self.node.send(tx)?)
+    }
+
+    pub fn sign_and_broadcast(&self, plan: &TxPlan) -> Result<Txid, WalletError> {
+        let tx = self.sign(plan)?;
+        self.broadcast(&tx)
+    }
+
+    /// The node's relay-floor fee rate in sat/kvB, for network-rate fee selection.
+    pub fn relay_feerate_sat_per_kvb(&self) -> Option<u64> {
+        self.node.relay_feerate_sat_per_kvb()
     }
 
     /// The smallest single coin covering `need`.

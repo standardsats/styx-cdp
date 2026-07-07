@@ -116,7 +116,7 @@ fn the_page_renders_and_stays_internal() {
     // liquid.network only on a deliberate click.
     for (i, _) in html.match_indices("https://") {
         assert!(
-            html[i..].starts_with("https://liquid.network/testnet/tx/"),
+            html[i..].starts_with("https://liquid.network/testnet/"),
             "unexpected external URL on the page"
         );
     }

@@ -22,6 +22,7 @@ use styx_pset::build;
 use styx_pset::intent::{
     BadDebtIntent, FullLiqIntent, FundingCoin, LiquidateIntent, ObolCoin, PokeIntent, RefreshIntent,
 };
+use styx_pset::plan::TxPlan;
 use styx_wallet::wallet::{retry_conflicts, LostRace, Wallet, WalletError, FEE};
 use styx_watch::quotes::{QuoteBook, WireQuote};
 use styx_watch::transport::QuoteTransport;
@@ -96,6 +97,38 @@ pub const REJECTED_EXIT: i32 = 65;
 /// Normally the spend confirms with the next block and the outpoint leaves the index; if
 /// the transaction fell out of the mempool instead, the keeper retries after this many.
 const ACTED_RETRY_BLOCKS: u32 = 6;
+
+/// The network fee for a `vsize`-vbyte transaction: the node's relay-floor rate with a small
+/// headroom, clamped below the flat `FEE` (never regress, never exceed what a fixture-sized
+/// coin covers) and above a dust-safe floor. Falls back to `FEE` when the node can't be
+/// asked. This turns the ~100x flat overpay on Liquid's 0.1 sat/vb relay into a network-rate
+/// fee - the flat FEE was sized for a 10x margin over 1 sat/vb.
+fn network_fee(w: &Wallet, vsize: usize) -> Sats {
+    const HEADROOM: u64 = 2;
+    const FLOOR: u64 = 300;
+    let Some(rate_kvb) = w.relay_feerate_sat_per_kvb() else {
+        return FEE;
+    };
+    let base = rate_kvb.saturating_mul(vsize as u64).div_ceil(1000);
+    Sats::new(base.saturating_mul(HEADROOM).clamp(FLOOR, FEE.raw()))
+}
+
+/// Build (via `build_plan`), sign, and broadcast a purse-funded op at the network fee. A
+/// provisional build at the flat `FEE` reveals the real Simplicity-witness vsize; it rebuilds
+/// at the estimated fee only when that is lower (the fee is an explicit fixed-width amount, so
+/// the vsize does not move). Only for ops whose fee the covenant does not constrain - poke and
+/// refresh, whose fee lands in the purse change.
+fn broadcast_estimated(
+    w: &Wallet,
+    build_plan: impl Fn(Sats) -> Result<TxPlan, WalletError>,
+) -> Result<Txid, WalletError> {
+    let provisional = w.sign(&build_plan(FEE)?)?;
+    let fee = network_fee(w, provisional.vsize());
+    if fee.raw() >= FEE.raw() {
+        return w.broadcast(&provisional);
+    }
+    w.broadcast(&w.sign(&build_plan(fee)?)?)
+}
 
 pub struct Keeper {
     /// The purse, shared: the daemon owns the only handle, styx-app hands the keeper the
@@ -342,21 +375,23 @@ impl Keeper {
                 let v = k.vault_at(vault)?;
                 let w = &*k.wallet();
                 let (fee_op, fee_val) = w.pick_lbtc(FEE.raw() + 1)?;
-                let built = build::refresh::refresh(
-                    &w.ctx,
-                    &v,
-                    &RefreshIntent {
-                        tick: tick.clone(),
-                        fee_coin: FundingCoin {
-                            outpoint: fee_op,
-                            value: Sats::new(fee_val),
-                            spk: w.funding_spk(),
+                broadcast_estimated(w, |fee| {
+                    Ok(build::refresh::refresh(
+                        &w.ctx,
+                        &v,
+                        &RefreshIntent {
+                            tick: tick.clone(),
+                            fee_coin: FundingCoin {
+                                outpoint: fee_op,
+                                value: Sats::new(fee_val),
+                                spk: w.funding_spk(),
+                            },
+                            change_spk: w.funding_spk(),
+                            fee,
                         },
-                        change_spk: w.funding_spk(),
-                        fee: FEE,
-                    },
-                )?;
-                w.sign_and_broadcast(&built.plan)
+                    )?
+                    .plan)
+                })
             })?,
             Action::None => return Ok(None),
         };
@@ -383,17 +418,19 @@ impl Keeper {
         let w = &*self.wallet();
         let protocol = w.protocol()?;
         let (op, val) = w.pick_lbtc(FEE.raw() + 1)?;
-        let built = build::poke::poke(
-            &w.ctx,
-            &protocol.issuer,
-            &PokeIntent {
-                tick: tick.clone(),
-                funding: FundingCoin { outpoint: op, value: Sats::new(val), spk: w.funding_spk() },
-                change_spk: w.funding_spk(),
-                fee: FEE,
-            },
-        )?;
-        w.sign_and_broadcast(&built.plan)
+        broadcast_estimated(w, |fee| {
+            Ok(build::poke::poke(
+                &w.ctx,
+                &protocol.issuer,
+                &PokeIntent {
+                    tick: tick.clone(),
+                    funding: FundingCoin { outpoint: op, value: Sats::new(val), spk: w.funding_spk() },
+                    change_spk: w.funding_spk(),
+                    fee,
+                },
+            )?
+            .plan)
+        })
     }
 
     /// The shared conflict-retry (styx-wallet's), with the keeper's lost-race policy:

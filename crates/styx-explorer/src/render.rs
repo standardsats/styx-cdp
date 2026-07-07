@@ -81,8 +81,10 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
     if let Some(t) = &v.tick {
         let cls = if v.pricing_stale { "stale" } else { "" };
         html.push_str(&format!(
-            "<span class=\"tickage {}\">tick h{} &middot; {}s ago{}</span>",
+            "<span class=\"tickage {}\">tick h<a href=\"https://liquid.network/testnet/block-height/{}\" \
+             target=\"_blank\" rel=\"noopener\">{}</a> &middot; {}s ago{}</span>",
             cls,
+            t.height,
             t.height,
             t.age_secs,
             if v.pricing_stale { " (stale)" } else { "" },

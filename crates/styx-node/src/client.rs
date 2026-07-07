@@ -107,6 +107,15 @@ impl Node {
             .ok_or(NodeError::Shape { context: "getblockchaininfo chain" })
     }
 
+    /// The node's minimum relay fee rate in sat/kvB (`getnetworkinfo.relayfee`, BTC/kvB
+    /// scaled). `None` if the node can't be reached - the caller falls back to a flat fee.
+    /// This is the real floor a fee must clear; `estimatesmartfee` is avoided because on a
+    /// quiet chain it returns the inflated `fallbackfee`, not the true relay minimum.
+    pub fn relay_feerate_sat_per_kvb(&self) -> Option<u64> {
+        let info = self.rpc("getnetworkinfo", &[]).ok()?;
+        Some((info["relayfee"].as_f64()? * 1e8).round() as u64)
+    }
+
     pub fn block_hash(&self, height: u32) -> Result<BlockHash, NodeError> {
         let s = self.rpc("getblockhash", &[height.into()])?;
         BlockHash::from_str(s.as_str().unwrap_or(""))

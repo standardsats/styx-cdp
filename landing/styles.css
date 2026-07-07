@@ -1,0 +1,389 @@
+/* STYX landing - entry point for the protocol.
+   Same obsidian-water world as the spec site: marble type, antique gold, the river. */
+
+@import url("fonts.css");
+
+:root {
+  --bg:        #0b0e12;
+  --bg-deep:   #07090c;
+  --surface:   #10141a;
+  --surface2:  #161b23;
+  --line:      #222933;
+  --line-soft: #1a2028;
+  --ink:       #eae5d6;
+  --body:      #b9b3a3;
+  --muted:     #7e7b6e;
+  --gold:      #c8a45c;
+  --gold-dim:  #97814e;
+  --gold-soft: rgba(200, 164, 92, 0.10);
+  --river:     #7fa3bc;
+  --river-soft: rgba(127, 163, 188, 0.10);
+  --display: "GFS Didot", "Didot", Georgia, serif;
+  --serif:   "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --measure: 47rem;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--body);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.72;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* dark water behind everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(127,163,188,0.05), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(200,164,92,0.04), transparent 55%),
+    var(--bg);
+}
+
+::selection { background: rgba(200,164,92,0.28); color: var(--ink); }
+
+a { color: var(--gold); text-decoration: none; }
+a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 26px 32px 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+}
+.topbar .brand {
+  font-family: var(--display);
+  font-size: 21px;
+  letter-spacing: 0.26em;
+  color: var(--ink);
+}
+.topbar .brand .xi { color: var(--gold); }
+.topbar nav { display: flex; flex-wrap: wrap; gap: 6px 26px; }
+.topbar nav a {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color .14s ease;
+}
+.topbar nav a:hover { color: var(--gold); }
+
+/* ---------- hero ---------- */
+
+.hero {
+  min-height: calc(92vh - 60px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 24px 40px;
+}
+
+.hero > * { animation: rise .8s cubic-bezier(.2,.7,.3,1) both; }
+.hero .kicker { animation-delay: .05s; }
+.hero .mark   { animation-delay: .15s; }
+.hero .lede   { animation-delay: .35s; }
+.hero .cta    { animation-delay: .5s; }
+.hero .frozen { animation-delay: .65s; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 34px;
+}
+
+/* the wordmark stands on the waterline; the river carries its reflection */
+.mark {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(64px, 13vw, 138px);
+  line-height: 1;
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  display: block;
+}
+.mark .xi { color: var(--gold); }
+.mark .word, .mark .refl {
+  display: block;
+  /* recenter: trailing letter-space after the last glyph */
+  padding-left: 0.22em;
+}
+
+.waterline {
+  display: block;
+  width: min(9.2em, 84vw);
+  height: 1px;
+  margin: 0.09em auto 0;
+  font-size: inherit;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(127,163,188,0.55) 18%,
+    rgba(127,163,188,0.75) 50%,
+    rgba(127,163,188,0.55) 82%,
+    transparent);
+  box-shadow: 0 0 18px rgba(127,163,188,0.25);
+}
+
+.refl {
+  transform: scaleY(-1);
+  margin-top: 0.02em;
+  opacity: 0.34;
+  filter: blur(2.5px);
+  /* two mask layers, intersected: the vertical fade into the deep,
+     and drifting wave slices that break the reflection */
+  -webkit-mask-image:
+    repeating-linear-gradient(180deg, rgba(0,0,0,0.95) 0 6px, rgba(0,0,0,0.3) 6px 8px),
+    linear-gradient(to top, rgba(0,0,0,0.9) 18%, transparent 78%);
+  mask-image:
+    repeating-linear-gradient(180deg, rgba(0,0,0,0.95) 0 6px, rgba(0,0,0,0.3) 6px 8px),
+    linear-gradient(to top, rgba(0,0,0,0.9) 18%, transparent 78%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  animation: heave 7s ease-in-out infinite alternate, lap 9s linear infinite;
+  pointer-events: none;
+  user-select: none;
+}
+@keyframes heave {
+  from { opacity: 0.26; }
+  to   { opacity: 0.4; }
+}
+@keyframes lap {
+  from { -webkit-mask-position: 0 0,    0 0; mask-position: 0 0,    0 0; }
+  to   { -webkit-mask-position: 0 24px, 0 0; mask-position: 0 24px, 0 0; }
+}
+
+.hero .lede {
+  max-width: 42rem;
+  margin-top: 20px;
+  font-size: 19px;
+  line-height: 1.62;
+  font-style: italic;
+}
+.hero .lede b { color: var(--ink); font-weight: 600; font-style: normal; }
+
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 38px;
+}
+.btn {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+  border: 1px solid var(--gold-dim);
+  border-radius: 999px;
+  padding: 13px 28px;
+  transition: color .14s ease, border-color .14s ease, background .14s ease;
+}
+.btn:hover { color: #e0c07f; border-color: var(--gold); background: var(--gold-soft); }
+.btn.ghost { border-color: var(--line); color: var(--body); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--muted); background: rgba(234,229,214,0.03); }
+
+.frozen {
+  margin-top: 30px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+/* ---------- sections ---------- */
+
+.section {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 34px 32px 0;
+}
+.section.wide { max-width: 62rem; }
+
+h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 28px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  margin: 40px 0 18px;
+}
+h2 .sec { color: var(--gold-dim); font-size: 17px; margin-right: 14px; letter-spacing: 0.08em; }
+
+.section p { margin-bottom: 16px; }
+.section p b { color: var(--ink); font-weight: 600; }
+
+/* stat strip, same shape as the spec's */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 28px 0 10px;
+}
+.stats .s { background: var(--surface); padding: 16px 18px 14px; }
+.stats .v { font-family: var(--display); font-size: 24px; color: var(--ink); line-height: 1.15; }
+.stats .v small { font-size: 14px; color: var(--gold); }
+.stats .k {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* the crossing: a vault's life in three steps */
+.steps { list-style: none; margin-top: 4px; }
+.step {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 22px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.step:last-child { border-bottom: none; }
+.step .gn {
+  font-family: var(--display);
+  font-size: 27px;
+  line-height: 1.3;
+  color: var(--gold-dim);
+  text-align: right;
+}
+.step h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 18.5px;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.step p { font-size: 15.5px; margin: 0; }
+
+/* ---------- gateways ---------- */
+
+.gates-lede { font-style: italic; margin-top: -6px; }
+
+.gates {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 24px;
+}
+.gate {
+  background: var(--surface);
+  padding: 26px 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: background .18s ease;
+}
+.gate:hover { background: var(--surface2); }
+.gate .chip {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2.5px 10px;
+}
+.gate .chip.gold { color: var(--gold); border-color: rgba(200,164,92,0.4); }
+.gate .chip.blue { color: var(--river); border-color: rgba(127,163,188,0.4); }
+.gate h3 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 23px;
+  color: var(--ink);
+  transition: color .14s ease;
+}
+.gate:hover h3 { color: var(--gold); }
+.gate p { font-size: 14.5px; line-height: 1.6; color: var(--body); }
+.gate .go {
+  margin-top: auto;
+  padding-top: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  transition: color .14s ease;
+}
+.gate:hover .go { color: var(--gold); }
+
+/* ---------- footer ---------- */
+
+footer {
+  max-width: var(--measure);
+  margin: 84px auto 0;
+  padding: 0 32px 64px;
+  text-align: center;
+}
+footer .meander {
+  height: 10px;
+  background-image: url("assets/meander.svg");
+  background-repeat: repeat-x;
+  background-size: auto 10px;
+  opacity: 0.55;
+  margin-bottom: 34px;
+}
+.epigraph {
+  font-style: italic;
+  font-size: 16.5px;
+  color: var(--body);
+  max-width: 30rem;
+  margin: 0 auto 18px;
+}
+.fine {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+/* ---------- responsive & preferences ---------- */
+
+@media (max-width: 640px) {
+  .topbar { padding: 20px 20px 0; flex-direction: column; align-items: center; gap: 12px; }
+  .hero { min-height: auto; padding: 48px 20px 20px; }
+  .section { padding-left: 20px; padding-right: 20px; }
+  .step { grid-template-columns: 40px 1fr; gap: 14px; }
+  .gates { grid-template-columns: 1fr; }
+  footer { padding-left: 20px; padding-right: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .hero > * { animation: none; }
+  .refl { animation: none; }
+}

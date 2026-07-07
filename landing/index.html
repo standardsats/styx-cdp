@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STYX - a covenant CDP on Liquid</title>
+<meta name="description" content="Lock L-BTC, mint OBOL. An interest-free CDP on the Liquid Network where every rule is a Simplicity covenant. No federation signs anything. No admin key exists.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0e12'/%3E%3Cg fill='%23c8a45c'%3E%3Crect x='16' y='17' width='32' height='5'/%3E%3Crect x='21' y='29.5' width='22' height='5'/%3E%3Crect x='16' y='42' width='32' height='5'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="./">ΣΤΥ<span class="xi">Ξ</span></a>
+  <nav aria-label="Site">
+    <a href="spec/">Specification</a>
+    <a href="https://explorer.testnet.styx.network">Explorer</a>
+    <a href="spec/source.html">Source</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <p class="kicker">A covenant CDP on the Liquid Network</p>
+  <h1 class="mark" aria-label="STYX">
+    <span class="word">ΣΤΥ<span class="xi">Ξ</span></span>
+    <span class="waterline" aria-hidden="true"></span>
+    <span class="refl" aria-hidden="true">ΣΤΥ<span class="xi">Ξ</span></span>
+  </h1>
+  <p class="lede">Lock L-BTC as collateral, mint OBOL, a USD-pegged debt token.
+  Every rule - who may mint, who may liquidate, what a keeper may take - is enforced
+  by Simplicity covenants on-chain. <b>No federation signs anything. No admin key exists.</b></p>
+  <div class="cta">
+    <a class="btn" href="spec/">Read the specification</a>
+    <a class="btn ghost" href="spec/source.html">Verify the covenants</a>
+  </div>
+  <p class="frozen">v1 covenant frozen 2026-07-03 &middot; CMR-pinned</p>
+</section>
+
+<main>
+
+<section class="section" id="promise">
+  <h2><span class="sec">Αʹ</span>One promise</h2>
+  <p>Every OBOL outside the pot is backed by at least its share of collateral, or has been
+  genuinely retired. There is no signer set to petition and no admin path to abuse: the
+  covenants price every operation themselves, from a vault's first draw to the last pro-rata
+  settlement. The OBOL supply is fixed at 100,000,000 forever - both genesis issuances were
+  made without a reissuance token, so no minting-based bailout is possible by construction.</p>
+
+  <div class="stats">
+    <div class="s"><div class="v">150<small>%</small></div><div class="k">min CR to open / draw</div></div>
+    <div class="s"><div class="v">130<small>%</small></div><div class="k">liquidation trigger</div></div>
+    <div class="s"><div class="v">3<small> of </small>5</div><div class="k">oracle quorum</div></div>
+    <div class="s"><div class="v">0<small>%</small></div><div class="k">interest</div></div>
+    <div class="s"><div class="v">100<small>M</small></div><div class="k">fixed OBOL supply</div></div>
+  </div>
+</section>
+
+<section class="section" id="crossing">
+  <h2><span class="sec">Βʹ</span>The crossing</h2>
+  <ol class="steps">
+    <li class="step">
+      <span class="gn" aria-hidden="true">Αʹ</span>
+      <div>
+        <h3>Open a vault</h3>
+        <p>Lock L-BTC and draw OBOL against it. The covenant prices collateral at the minimum
+        quote of a fresh 3-of-5 oracle tick and refuses any draw below 150% cover.</p>
+      </div>
+    </li>
+    <li class="step">
+      <span class="gn" aria-hidden="true">Βʹ</span>
+      <div>
+        <h3>Carry the debt</h3>
+        <p>Nothing accrues while you hold. There is no interest, no funding rate, and no
+        governance that can change the terms under you; the vault is a UTXO that only its own
+        covenant can move.</p>
+      </div>
+    </li>
+    <li class="step">
+      <span class="gn" aria-hidden="true">Γʹ</span>
+      <div>
+        <h3>Cross back</h3>
+        <p>Repay the debt and the covenant releases the collateral. If cover falls below 130%,
+        anyone may liquidate within the covenant's caps; OBOL holders can always redeem at the
+        peg floor.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="section wide" id="gates">
+  <h2><span class="sec">Γʹ</span>Gateways</h2>
+  <p class="gates-lede">Everything the protocol exposes is public. Start anywhere.</p>
+  <div class="gates">
+    <a class="gate" href="spec/">
+      <span class="chip gold">v1 &middot; normative</span>
+      <h3>Specification</h3>
+      <p>Twelve chapters covering architecture, covenants, transaction lifecycle, the oracle,
+      economics and the security record. Every behavioral claim verified against the frozen
+      source.</p>
+      <span class="go">read the spec &rsaquo;</span>
+    </a>
+    <a class="gate" href="https://explorer.testnet.styx.network">
+      <span class="chip blue">testnet</span>
+      <h3>Explorer</h3>
+      <p>Vaults, the pot, the issuer and the reserve as the chain confirms them: positions,
+      CR bands, the liquidation feed, and per-slot oracle freshness.</p>
+      <span class="go">open the explorer &rsaquo;</span>
+    </a>
+    <a class="gate" href="spec/source.html">
+      <span class="chip gold">CMR-pinned</span>
+      <h3>Covenant source</h3>
+      <p>The five frozen Simplicity programs. Read the asserts, recompute the roots, check the
+      addresses yourself.</p>
+      <span class="go">verify the source &rsaquo;</span>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="meander"></div>
+  <p class="epigraph">An obol buys the crossing or it does not.
+  There is no negotiating with the covenant.</p>
+  <p class="fine">covenant frozen 2026-07-03 &middot; CMR-pinned source &middot; no admin key exists</p>
+</footer>
+
+</body>
+</html>

@@ -12,10 +12,18 @@ use crate::keeper::KeeperOpts;
 pub struct KeeperConfig {
     #[serde(flatten)]
     pub purse: WalletConfig,
-    /// POKE when the issuer anchor lags the tip by more than this many blocks.
+    /// POKE when the issuer anchor lags the tip by more than this many blocks. The cost/risk
+    /// knob for the idle keeper: a poke advances the anchor, so this bounds how stale a tick a
+    /// mint may reuse during quiet spells. Lower = fresher mint-price floor but a poke (one
+    /// fee) roughly every `poke_lag + 1` blocks; higher = fewer pokes and a cheaper idle
+    /// keeper, at a looser staleness bound. Mints and attests refresh the anchor for free, so
+    /// on an active system pokes are rare regardless.
     #[serde(default = "default_poke_lag")]
     pub poke_lag: u32,
-    /// REFRESH healthy vaults whose ratchet lags by more than this many blocks (M-2).
+    /// REFRESH a healthy vault whose ratchet lags the tip by more than this many blocks (M-2).
+    /// Same cost/risk shape: lower keeps vaults actionable sooner (a vault acts only on a tick
+    /// above its ratchet) but spends more on refresh fees; higher is cheaper but leaves a vault
+    /// briefly unactionable after a long quiet spell.
     #[serde(default = "default_refresh_lag")]
     pub refresh_lag: u32,
     /// How far below the tip the tick assembly walks looking for a quote quorum.

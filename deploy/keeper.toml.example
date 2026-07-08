@@ -10,8 +10,13 @@ snapshot = "/var/lib/styx/keeper-snapshot.json"
 owner_seckey = "REPLACE"
 funding_seckey = "REPLACE"
 
-# POKE when the issuer anchor lags the tip by more than this many blocks.
+# Cadence knobs - the keeper's cost/risk dial. Fees now track the network rate (relayfee),
+# so these mainly set how OFTEN the idle keeper spends at all.
+# POKE when the issuer anchor lags the tip by more than this many blocks: bounds how stale a
+# tick a mint can reuse during quiet spells. Lower = fresher floor, ~one poke fee every
+# poke_lag+1 blocks; higher = cheaper idle keeper, looser bound. Mints/attests refresh it free.
 poke_lag = 4
-# REFRESH healthy vaults whose ratchet lags by more than this many blocks.
+# REFRESH a healthy vault whose ratchet lags by more than this many blocks. Lower = vaults
+# actionable sooner but more refresh fees; higher = cheaper but a brief post-quiet lag.
 refresh_lag = 16
 poll_ms = 1000

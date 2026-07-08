@@ -113,11 +113,13 @@ fn network_fee(w: &Wallet, vsize: usize) -> Sats {
     Sats::new(base.saturating_mul(HEADROOM).clamp(FLOOR, FEE.raw()))
 }
 
-/// Build (via `build_plan`), sign, and broadcast a purse-funded op at the network fee. A
-/// provisional build at the flat `FEE` reveals the real Simplicity-witness vsize; it rebuilds
-/// at the estimated fee only when that is lower (the fee is an explicit fixed-width amount, so
-/// the vsize does not move). Only for ops whose fee the covenant does not constrain - poke and
-/// refresh, whose fee lands in the purse change.
+/// Build (via `build_plan`), sign, and broadcast an op at the network fee. A provisional build
+/// at the flat `FEE` reveals the real Simplicity-witness vsize; it rebuilds at the estimated
+/// fee only when that is lower (the fee is an explicit fixed-width amount, so the vsize does
+/// not move). If the lower-fee rebuild fails to build or sign - a fee-entangled liquidation
+/// whose amounts no longer fit at the smaller fee - it falls back to the provisional, so the
+/// worst case is the old flat fee, never a dropped action. `build_plan` re-runs any
+/// fee-dependent planning (e.g. `decide`) for the fee it is given.
 fn broadcast_estimated(
     w: &Wallet,
     build_plan: impl Fn(Sats) -> Result<TxPlan, WalletError>,
@@ -127,7 +129,10 @@ fn broadcast_estimated(
     if fee.raw() >= FEE.raw() {
         return w.broadcast(&provisional);
     }
-    w.broadcast(&w.sign(&build_plan(fee)?)?)
+    match build_plan(fee).and_then(|p| w.sign(&p)) {
+        Ok(tx) => w.broadcast(&tx),
+        Err(_) => w.broadcast(&provisional),
+    }
 }
 
 pub struct Keeper {
@@ -299,31 +304,44 @@ impl Keeper {
     ) -> Result<Option<Performed>, KeeperError> {
         let txid = match action {
             Action::Partial { .. } => self.with_retry("partial liquidate", |k| {
+                let refresh_lag = k.opts.refresh_lag;
                 let v = k.vault_at(vault)?;
                 let w = &*k.wallet();
                 let protocol = w.protocol()?;
                 // Re-plan against the re-read vault: a conflict may have changed it.
                 let anchor = protocol.issuer.state.last_mint_height;
-                let Action::Partial { dd, residual } = decide(&v, tick, anchor, k.opts.refresh_lag, FEE)
-                else {
+                // The `dd` shrinks as the fee shrinks (extraction <= share + fee), so size the
+                // OBOL coin once for the flat-fee dd - it covers any lower-fee dd - and let the
+                // estimated build re-decide within it.
+                let Action::Partial { dd: dd0, .. } = decide(&v, tick, anchor, refresh_lag, FEE) else {
                     return Err(WalletError::VaultNotFound(vault)); // no longer partial: resolved
                 };
-                let (op, val) = w.ensure_obol(dd.raw())?;
-                let built = build::liquidate::liquidate(
-                    &w.ctx,
-                    &protocol,
-                    &v,
-                    &LiquidateIntent {
-                        dd,
-                        residual,
-                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
-                        keeper_spk: w.funding_spk(),
-                        obol_change_spk: w.funding_spk(),
-                        tick: tick.clone(),
-                        fee: FEE,
-                    },
-                )?;
-                w.sign_and_broadcast(&built.plan)
+                let (op, val) = w.ensure_obol(dd0.raw())?;
+                broadcast_estimated(w, |fee| {
+                    let Action::Partial { dd, residual } = decide(&v, tick, anchor, refresh_lag, fee)
+                    else {
+                        return Err(WalletError::VaultNotFound(vault));
+                    };
+                    Ok(build::liquidate::liquidate(
+                        &w.ctx,
+                        &protocol,
+                        &v,
+                        &LiquidateIntent {
+                            dd,
+                            residual,
+                            keeper: ObolCoin {
+                                outpoint: op,
+                                value: Obol::new(val),
+                                spk: w.funding_spk(),
+                            },
+                            keeper_spk: w.funding_spk(),
+                            obol_change_spk: w.funding_spk(),
+                            tick: tick.clone(),
+                            fee,
+                        },
+                    )?
+                    .plan)
+                })
             })?,
             Action::FullLiq => self.with_retry("full liquidate", |k| {
                 let v = k.vault_at(vault)?;
@@ -331,19 +349,25 @@ impl Keeper {
                 let protocol = w.protocol()?;
                 // Strictly more than the debt: the positive OBOL change is the E-5 anchor.
                 let (op, val) = w.ensure_obol(v.state.debt.raw() + 1)?;
-                let built = build::full_liq::full_liq(
-                    &w.ctx,
-                    &protocol,
-                    &v,
-                    &FullLiqIntent {
-                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
-                        keeper_spk: w.funding_spk(),
-                        obol_change_spk: w.funding_spk(),
-                        tick: tick.clone(),
-                        fee: FEE,
-                    },
-                )?;
-                w.sign_and_broadcast(&built.plan)
+                broadcast_estimated(w, |fee| {
+                    Ok(build::full_liq::full_liq(
+                        &w.ctx,
+                        &protocol,
+                        &v,
+                        &FullLiqIntent {
+                            keeper: ObolCoin {
+                                outpoint: op,
+                                value: Obol::new(val),
+                                spk: w.funding_spk(),
+                            },
+                            keeper_spk: w.funding_spk(),
+                            obol_change_spk: w.funding_spk(),
+                            tick: tick.clone(),
+                            fee,
+                        },
+                    )?
+                    .plan)
+                })
             })?,
             Action::BadDebt => self.with_retry("bad debt", |k| {
                 let v = k.vault_at(vault)?;
@@ -351,25 +375,31 @@ impl Keeper {
                 let protocol = w.protocol()?;
                 let (op, val) = w.ensure_obol(v.state.debt.raw())?;
                 let (fee_op, fee_val) = w.pick_lbtc(FEE.raw() + 1)?;
-                let built = build::bad_debt::bad_debt(
-                    &w.ctx,
-                    &protocol,
-                    &v,
-                    &BadDebtIntent {
-                        keeper: ObolCoin { outpoint: op, value: Obol::new(val), spk: w.funding_spk() },
-                        keeper_spk: w.funding_spk(),
-                        obol_change_spk: w.funding_spk(),
-                        fee_coin: FundingCoin {
-                            outpoint: fee_op,
-                            value: Sats::new(fee_val),
-                            spk: w.funding_spk(),
+                broadcast_estimated(w, |fee| {
+                    Ok(build::bad_debt::bad_debt(
+                        &w.ctx,
+                        &protocol,
+                        &v,
+                        &BadDebtIntent {
+                            keeper: ObolCoin {
+                                outpoint: op,
+                                value: Obol::new(val),
+                                spk: w.funding_spk(),
+                            },
+                            keeper_spk: w.funding_spk(),
+                            obol_change_spk: w.funding_spk(),
+                            fee_coin: FundingCoin {
+                                outpoint: fee_op,
+                                value: Sats::new(fee_val),
+                                spk: w.funding_spk(),
+                            },
+                            change_spk: w.funding_spk(),
+                            tick: tick.clone(),
+                            fee,
                         },
-                        change_spk: w.funding_spk(),
-                        tick: tick.clone(),
-                        fee: FEE,
-                    },
-                )?;
-                w.sign_and_broadcast(&built.plan)
+                    )?
+                    .plan)
+                })
             })?,
             Action::Refresh => self.with_retry("refresh", |k| {
                 let v = k.vault_at(vault)?;

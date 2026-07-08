@@ -82,6 +82,7 @@ fn synthetic() -> std::sync::Arc<ExplorerState> {
             ],
         )
         .unwrap(),
+        None,
     );
     state
 }
@@ -164,6 +165,7 @@ fn band_boundaries_are_the_ladder_boundaries_in_sats() {
             ],
         )
         .unwrap(),
+        None,
     );
     let view = state.view();
     for (n, coll, want) in cases {

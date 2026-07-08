@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 use styx_core::consts::{K_FULL_LIQ_CAP, K_HEALTH_GATE, K_PAR};
+use styx_core::elements::BlockHash;
 use styx_core::math::coll_at_cr;
 use styx_core::oracle::OracleTick;
 use styx_core::units::{Obol, Price, Sats};
@@ -26,7 +27,7 @@ pub const TICK_FRESH: std::time::Duration = std::time::Duration::from_secs(90);
 pub struct ExplorerState {
     pub index: RwLock<IndexState>,
     events: Mutex<VecDeque<Notice>>,
-    tick: RwLock<Option<(OracleTick, Instant)>>,
+    tick: RwLock<Option<(OracleTick, Instant, Option<BlockHash>)>>,
     slot_seen: Mutex<[Option<Instant>; 5]>,
     slot_name: Mutex<[Option<String>; 5]>,
     slot_price: Mutex<[Option<u32>; 5]>,
@@ -55,8 +56,8 @@ impl ExplorerState {
         ev.truncate(EVENTS_KEPT);
     }
 
-    pub fn set_tick(&self, tick: OracleTick) {
-        *self.tick.write().unwrap_or_else(|e| e.into_inner()) = Some((tick, Instant::now()));
+    pub fn set_tick(&self, tick: OracleTick, block_hash: Option<BlockHash>) {
+        *self.tick.write().unwrap_or_else(|e| e.into_inner()) = Some((tick, Instant::now(), block_hash));
     }
 
     pub fn tick(&self) -> Option<OracleTick> {
@@ -64,8 +65,8 @@ impl ExplorerState {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .filter(|(_, at)| at.elapsed() <= TICK_MAX_AGE)
-            .map(|(t, _)| t.clone())
+            .filter(|(_, at, _)| at.elapsed() <= TICK_MAX_AGE)
+            .map(|(t, _, _)| t.clone())
     }
 
     pub fn saw_slot(&self, slot: usize, name: &str, price: u32) {
@@ -84,14 +85,14 @@ impl ExplorerState {
     pub fn view(&self) -> View {
         // Read the tick with its age in one snapshot: the bands and the freshness marker
         // must describe the same tick.
-        let ticked: Option<(OracleTick, u64)> = self
+        let ticked: Option<(OracleTick, u64, Option<BlockHash>)> = self
             .tick
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .filter(|(_, at)| at.elapsed() <= TICK_MAX_AGE)
-            .map(|(t, at)| (t.clone(), at.elapsed().as_secs()));
-        let hi = ticked.as_ref().map(|(t, _)| t.price_range().1);
+            .filter(|(_, at, _)| at.elapsed() <= TICK_MAX_AGE)
+            .map(|(t, at, hash)| (t.clone(), at.elapsed().as_secs(), *hash));
+        let hi = ticked.as_ref().map(|(t, _, _)| t.price_range().1);
         let index = self.index.read().unwrap_or_else(|e| e.into_inner());
         let protocol = index.protocol().map(|p| {
             let singleton = |name: &'static str, op: &styx_core::elements::OutPoint| SingletonView {
@@ -141,11 +142,17 @@ impl ExplorerState {
         View {
             height: index.height,
             protocol,
-            tick: ticked.as_ref().map(|(t, age)| {
+            tick: ticked.as_ref().map(|(t, age, hash)| {
                 let (lo, hi) = t.price_range();
-                TickView { height: t.height().raw(), lo: lo.raw(), hi: hi.raw(), age_secs: *age }
+                TickView {
+                    height: t.height().raw(),
+                    lo: lo.raw(),
+                    hi: hi.raw(),
+                    age_secs: *age,
+                    block_hash: hash.map(|h| h.to_string()),
+                }
             }),
-            pricing_stale: ticked.as_ref().is_some_and(|(_, age)| *age > TICK_FRESH.as_secs()),
+            pricing_stale: ticked.as_ref().is_some_and(|(_, age, _)| *age > TICK_FRESH.as_secs()),
             vaults,
             lost: index.lost.len(),
             events,
@@ -220,6 +227,9 @@ pub struct TickView {
     pub hi: u32,
     /// Seconds since this tick was assembled - how current the vault bands are.
     pub age_secs: u64,
+    /// The tick height's block hash, for the public-explorer link (None if the node lookup
+    /// failed - liquid.network addresses blocks by hash, not height).
+    pub block_hash: Option<String>,
 }
 
 #[derive(Serialize)]

@@ -80,12 +80,21 @@ pub fn page(v: &View, app_url: Option<&str>) -> String {
     // How current the pricing (and therefore the vault bands) is.
     if let Some(t) = &v.tick {
         let cls = if v.pricing_stale { "stale" } else { "" };
+        // Link the height to its block when the hash is known (liquid.network wants the hash);
+        // the "h" lives inside the link so it doesn't run into the number.
+        let height = match &t.block_hash {
+            Some(hash) => format!(
+                "<a href=\"https://liquid.network/testnet/block/{}\" target=\"_blank\" \
+                 rel=\"noopener\">h{}</a>",
+                esc(hash),
+                t.height
+            ),
+            None => format!("h{}", t.height),
+        };
         html.push_str(&format!(
-            "<span class=\"tickage {}\">tick h<a href=\"https://liquid.network/testnet/block-height/{}\" \
-             target=\"_blank\" rel=\"noopener\">{}</a> &middot; {}s ago{}</span>",
+            "<span class=\"tickage {}\">tick {} &middot; {}s ago{}</span>",
             cls,
-            t.height,
-            t.height,
+            height,
             t.age_secs,
             if v.pricing_stale { " (stale)" } else { "" },
         ));

@@ -75,6 +75,7 @@ fn sync_loop(
 async fn quote_loop(
     net: StyxnetConfig,
     oracle_pks: [styx_core::elements::secp256k1_zkp::XOnlyPublicKey; 5],
+    node: Node,
     state: Arc<ExplorerState>,
 ) {
     let authors: Vec<nostr_sdk::PublicKey> = net
@@ -105,7 +106,9 @@ async fn quote_loop(
                         state.saw_slot(q.slot as usize, &q.name, q.price);
                         for h in (tip.saturating_sub(8)..=tip).rev() {
                             if let Some(tick) = book.assemble_tick(BlockHeight::new(h)) {
-                                state.set_tick(tick);
+                                // The tick height's block hash, for the explorer's block link.
+                                let hash = node.block_hash(tick.height().raw()).ok();
+                                state.set_tick(tick, hash);
                                 break;
                             }
                         }
@@ -136,6 +139,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("styxnet.toml has no [protocol] section (run the ceremony first)")?;
 
     let node = Node::from_url(&cfg.rpc_url, cfg.auth()?)?;
+    // A second RPC handle for the quote loop (the first is moved into the sync loop): it
+    // resolves each tick height to a block hash for the explorer's block link.
+    let quote_node = Node::from_url(&cfg.rpc_url, cfg.auth()?)?;
     let node_genesis = node.genesis()?;
     if node_genesis != genesis {
         return Err(format!("genesis mismatch: config {genesis}, node {node_genesis}").into());
@@ -156,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (state, snapshot_path) = (state.clone(), cfg.snapshot.clone());
         tokio::task::spawn_blocking(move || sync_loop(node, ctx, anchor, snapshot_path, state, poll));
     }
-    tokio::spawn(quote_loop(net, oracle_pks, state.clone()));
+    tokio::spawn(quote_loop(net, oracle_pks, quote_node, state.clone()));
 
     let app = Arc::new(App { state, app_url: cfg.app_url.clone() });
     println!("styx-explorer up: http://{addr}/");

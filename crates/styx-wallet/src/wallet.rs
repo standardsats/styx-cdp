@@ -63,6 +63,8 @@ pub enum WalletError {
     GenesisMismatch { config: BlockHash, node: BlockHash },
     #[error("the protocol is not live on this chain yet (sync first, or deploy)")]
     NotLive,
+    #[error("the node is still syncing: height {tip}, the deployment starts at {anchor} - wait for sync and retry")]
+    NodeBehindAnchor { tip: u32, anchor: u32 },
     #[error("vault {0} is not tracked")]
     VaultNotFound(OutPoint),
     #[error("vault {0} is not ours (or its owner is unresolved)")]
@@ -186,6 +188,10 @@ impl Wallet {
             match &net.protocol {
                 Some(p) => {
                     let start = p.issuer_anchor_genesis;
+                    let tip = node.height()?;
+                    if tip < start {
+                        return Err(WalletError::NodeBehindAnchor { tip, anchor: start });
+                    }
                     IndexState::at_height(start, node.block_hash(start)?)
                 }
                 None => IndexState::genesis(genesis),

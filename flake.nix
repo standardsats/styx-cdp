@@ -160,6 +160,7 @@
           # rehearsal launches it locally.
           pkgs.nostr-rs-relay
           pkgs.curl # the scenario scripts drive the oracle admin endpoints
+          pkgs.openssl # deploy/join-testnet.sh generates the node's rpcauth line
         ];
 
         # The e2e tier (styx-node tests) reads this to find the Simplicity-capable node.

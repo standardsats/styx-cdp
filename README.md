@@ -15,7 +15,8 @@ no multisig, federation, or admin keys.
   it, the keeper, a price-crash liquidation.
 - [TESTNET.md](TESTNET.md) - **start here to try it:** the explorer, the local app (a web
   UI for the wallet and the keeper), or the CLI, against the public Liquid-testnet
-  deployment - faucet, a vault, and hunting other people's positions.
+  deployment - `deploy/join-testnet.sh` sets it all up, then faucet, a vault, and hunting
+  other people's positions.
 - [SETUP.md](SETUP.md) - multi-machine network bring-up; `deploy/swarm.sh` rehearses the
   whole topology on one host.
 - [DEPLOY.md](DEPLOY.md) - the operator's deploy-day runbook for the public testnet

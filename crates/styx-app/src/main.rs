@@ -94,8 +94,17 @@ async fn tick_loop(
     }
 }
 
+// Same rationale as the wallet CLI: startup errors ("the node is still syncing: ...")
+// are user-facing, print Display rather than a `?`-out-of-main Debug.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let cfg = AppConfig::load(&args.config)?;
     let (addr, proxy_hosts, proxy_origins) = cfg.bind()?;

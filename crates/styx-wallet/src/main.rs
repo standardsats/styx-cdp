@@ -162,8 +162,17 @@ fn print_report(label: &str, report: &styx_wallet::ops::OpReport) {
     println!("(wait for a block, then `status` reflects it)");
 }
 
+// A `?` out of main prints the error's Debug; this CLI is user-facing, so show Display
+// ("the node is still syncing: ...") instead of the enum spelled out.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     if let Cmd::Keygen = cli.cmd {

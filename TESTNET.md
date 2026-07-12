@@ -5,12 +5,6 @@ on the public Liquid testnet, with worthless coins. Everything is permissionless
 protocol is five frozen covenants and there is no admin key anywhere; the oracles and the
 quote relay are the only operated pieces.
 
-> **Status: the public deployment is not live yet.** The endpoints below
-> (`explorer.testnet.styx.network`, `relay.testnet.styx.network`,
-> `oracle{0..4}.testnet.styx.network`) are where it will run. Until then, stand the whole
-> thing up on one machine with `deploy/swarm.sh` (see [GUIDE.md](GUIDE.md)) - the flow is
-> identical, only the config points at localhost.
-
 Watch the protocol live first - the explorer at **https://explorer.testnet.styx.network**
 shows every vault, the CR bands, oracle freshness, and the liquidation feed, straight from
 the chain, no install.
@@ -19,6 +13,22 @@ Two ways to act: the **app** (a local web UI for the wallet and the keeper - the
 or the **CLI** (scriptable, same library underneath). Both talk only to your own node and
 the public relay; there is no trusted server. Either way you need the binaries, a
 Liquid-testnet node, and the published config.
+
+## 0. The short way
+
+Everything in sections 1-5a, one idempotent command:
+
+```bash
+git clone https://github.com/styx-network/cdp-styx-v1 && cd cdp-styx-v1
+nix develop
+deploy/join-testnet.sh
+```
+
+It builds the binaries and writes `~/.styx`: the node dir with generated RPC credentials,
+your keys, the published deployment config, and one `app.toml` that the app and the CLI
+both read. It ends with the steps it cannot do for you - start the node, wait for sync,
+faucet, run - printed in order. Re-running is safe: existing files are kept and the recap
+prints again. Walk sections 1-5 instead when you want to see each piece.
 
 ## 1. Binaries and node
 
@@ -38,7 +48,10 @@ cp deploy/liquidtestnet.elements.conf ~/.styx/node/elements.conf
 elementsd -datadir=~/.styx/node
 ```
 
-Wait for sync, then confirm Simplicity is live on this chain:
+First sync takes a few hours. The wallet does not need the whole history - it indexes from
+the deployment height - but the node must get past that height before any wallet command
+works; until then both the app and the CLI refuse with `the node is still syncing`. Once
+synced, confirm Simplicity is live on this chain:
 
 ```bash
 elements-cli -datadir=~/.styx/node getdeploymentinfo | grep -A3 simplicity
@@ -97,6 +110,9 @@ If the app is all you want, skip to section 6 (what the keeper does) and section
 (troubleshooting). The CLI below does the same things, scriptably.
 
 ## 5. The CLI
+
+The `app.toml` from section 0 (or 4) already works here - every command below takes
+`--config ~/.styx/app.toml`. 5a spells out the same fields as a standalone wallet config.
 
 ### 5a. wallet.toml
 
@@ -177,6 +193,9 @@ prices come from five live exchanges, so real dips make real races.
 
 ## 7. When something looks wrong
 
+- `the node is still syncing: height X, the deployment starts at Y`: exactly what it says -
+  your node has not reached the protocol's deployment height yet. Watch
+  `elements-cli -datadir=~/.styx/node getblockcount` climb to Y; nothing is wrong.
 - `no oracle quorum near the tip`: the relay or the oracles are behind. The explorer at
   https://explorer.testnet.styx.network shows per-slot oracle freshness - if the slots are
   stale there too, it is the deployment, not you; wait or report it.

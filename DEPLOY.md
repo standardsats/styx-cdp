@@ -169,7 +169,7 @@ Go-live checklist:
 - [ ] A treasury vault exists and OBOL has reached at least one keeper.
 - [ ] One end-to-end owner cycle (open through close) and one keeper liquidation confirmed
       on the live chain.
-- [ ] The "not live yet" banner and the URL notes in [TESTNET.md](TESTNET.md) are removed /
+- [x] The "not live yet" banner and the URL notes in [TESTNET.md](TESTNET.md) are removed /
       finalized.
 
 Only then announce and point people at TESTNET.md.

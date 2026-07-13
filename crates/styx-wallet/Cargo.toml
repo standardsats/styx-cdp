@@ -2,6 +2,8 @@
 name = "styx-wallet"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 owner wallet CLI: vault operations over the builder pipeline with key-path p2tr funding"
 

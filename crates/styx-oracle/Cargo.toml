@@ -2,6 +2,8 @@
 name = "styx-oracle"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 oracle daemon: signs per-block ticks, publishes them over Nostr, serves the debug/admin HTTP surface"
 

@@ -2,6 +2,8 @@
 name = "styx-app"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 local application: the wallet and the keeper behind one loopback-only HTTP API"
 

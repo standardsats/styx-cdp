@@ -33,3 +33,11 @@ cargo test -p styx-node -- --ignored   # on-node e2e (regtest)
 
 Without nix: rustc >= 1.88 builds the fast tiers; the e2e tier needs an elementsd built from
 the ElementsProject `simplicity` branch, pointed to by `ELEMENTSD_EXE`.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option. Unless you explicitly state otherwise,
+any contribution intentionally submitted for inclusion in this work by you, as
+defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.

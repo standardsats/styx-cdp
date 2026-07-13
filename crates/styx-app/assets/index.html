@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STYX</title>
+<link rel="icon" href="/favicon.svg">
 <link rel="stylesheet" href="/app.css">
 <script src="/session.js"></script>
 <script defer src="/app.js"></script>
@@ -17,6 +18,7 @@
     <span>pot <b id="pot">-</b></span>
     <span>reserve <b id="reserve">-</b></span>
     <span id="keeper-badge" class="badge idle">keeper idle</span>
+    <span id="pending-badge" class="badge pending hidden"></span>
   </div>
 </header>
 
@@ -42,28 +44,69 @@
   <section class="card">
     <h2>Open a vault</h2>
     <form id="open-form">
-      <label>principal (OBOL units) <input name="principal" type="number" min="1" required></label>
-      <label>collateral (sats) <input name="collateral" type="number" min="1"></label>
-      <label>or CR % <input name="cr_percent" type="number" min="150" placeholder="150"></label>
+      <label>borrow (OBOL units) <b id="principal-usd" class="val"></b>
+        <input name="principal" id="principal" type="number" min="1" required>
+        <input id="principal-range" type="range" min="1" max="1" step="1" value="1">
+      </label>
+      <label>CR <b id="cr-view" class="val">200%</b>
+        <input name="cr_percent" id="cr-range" type="range" min="150" max="400" step="5" value="200">
+      </label>
+      <p class="muted">collateral at the current price: <b id="coll-est" class="val">-</b> sats</p>
+      <label>explicit collateral instead (sats) <input name="collateral" type="number" min="1"></label>
       <button>open</button>
     </form>
   </section>
 
   <section class="card">
     <h2>Act on a vault</h2>
-    <form id="op-form">
-      <label>vault
-        <select name="vault" id="vault-select"><option value="">(only vault)</option></select>
+    <label>vault
+      <select id="vault-select"><option value="">(only vault)</option></select>
+    </label>
+    <div id="vault-facts" class="chainline hidden">
+      <span>debt <b id="vf-debt">-</b></span>
+      <span>collateral <b id="vf-coll">-</b> sats</span>
+      <span>CR <b id="vf-cr">-</b></span>
+    </div>
+    <nav class="tabs" id="op-tabs">
+      <button type="button" data-tab="repay" class="active">repay</button>
+      <button type="button" data-tab="draw">draw</button>
+      <button type="button" data-tab="redeem">redeem</button>
+      <button type="button" data-tab="refresh">refresh</button>
+      <button type="button" data-tab="close">close</button>
+    </nav>
+    <div class="op-panel" id="panel-repay">
+      <label>repay (OBOL units) <b id="repay-usd" class="val"></b>
+        <input id="repay-amount" type="number" min="1">
+        <input id="repay-range" type="range" min="1" max="1" step="1" value="1">
       </label>
-      <label>amount (OBOL units) <input name="amount" type="number" min="1"></label>
-      <div class="buttons">
-        <button data-op="repay">repay</button>
-        <button data-op="draw">draw</button>
-        <button data-op="redeem">redeem</button>
-        <button data-op="refresh">refresh</button>
-        <button data-op="close" class="danger">close</button>
-      </div>
-    </form>
+      <p class="muted" id="repay-note">-</p>
+      <button type="button" class="op-go" data-op="repay">repay</button>
+    </div>
+    <div class="op-panel hidden" id="panel-draw">
+      <label>draw (OBOL units) <b id="draw-usd" class="val"></b>
+        <input id="draw-amount" type="number" min="1">
+        <input id="draw-range" type="range" min="1" max="1" step="1" value="1">
+      </label>
+      <p class="muted" id="draw-note">-</p>
+      <button type="button" class="op-go" data-op="draw">draw</button>
+    </div>
+    <div class="op-panel hidden" id="panel-redeem">
+      <label>redeem (OBOL units) <b id="redeem-usd" class="val"></b>
+        <input id="redeem-amount" type="number" min="1">
+        <input id="redeem-range" type="range" min="1" max="1" step="1" value="1">
+      </label>
+      <p class="muted" id="redeem-note">-</p>
+      <button type="button" class="op-go" data-op="redeem">redeem</button>
+    </div>
+    <div class="op-panel hidden" id="panel-refresh">
+      <p class="muted">re-acknowledge the current tick: keeps the vault's ratchet fresh so a
+      keeper has nothing to poke. No amounts.</p>
+      <button type="button" class="op-go" data-op="refresh">refresh</button>
+    </div>
+    <div class="op-panel hidden" id="panel-close">
+      <p class="muted" id="close-note">-</p>
+      <button type="button" class="op-go danger" data-op="close">close</button>
+    </div>
   </section>
 
   <section class="card">

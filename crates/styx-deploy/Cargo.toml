@@ -2,6 +2,8 @@
 name = "styx-deploy"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 deployment tool: the ceremony against a live node + styxnet.toml emission and verification"
 

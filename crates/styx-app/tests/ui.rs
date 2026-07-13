@@ -22,6 +22,9 @@ fn get(host: &str, path: &str) -> Request<axum::body::Body> {
 #[test]
 fn no_asset_references_an_external_url() {
     for (name, body) in all_assets() {
+        // The SVG xmlns is a namespace identifier, not a fetch - the one sanctioned
+        // http:// in an asset.
+        let body = body.replace("xmlns=\"http://www.w3.org/2000/svg\"", "");
         assert!(!body.contains("http://"), "{name} carries an external http URL");
         assert!(!body.contains("https://"), "{name} carries an external https URL");
         assert!(!body.contains("url(//"), "{name} carries a protocol-relative URL");
@@ -74,7 +77,9 @@ async fn the_page_tier_is_host_gated_and_carries_the_token() {
     assert!(String::from_utf8(body.to_vec()).unwrap().contains(&token));
 
     // Assets resolve; fonts are real woff2 payloads.
-    for path in ["/app.css", "/app.js", "/fonts/didot-latin.woff2", "/fonts/plex-mono-400.woff2"] {
+    for path in
+        ["/app.css", "/app.js", "/favicon.svg", "/fonts/didot-latin.woff2", "/fonts/plex-mono-400.woff2"]
+    {
         let resp = app.clone().oneshot(get("localhost:9780", path)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "{path}");
     }

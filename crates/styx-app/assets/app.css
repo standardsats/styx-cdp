@@ -70,6 +70,9 @@ h2 { font-family: var(--display); color: var(--gold); font-weight: 400; font-siz
 .badge.idle { color: var(--muted); }
 .badge.running { color: var(--ok); border-color: var(--ok); }
 .badge.alert { color: var(--warn); border-color: var(--warn); }
+.badge.pending { color: var(--river); border-color: var(--river); }
+.op-error { color: var(--warn); border-left: 2px solid var(--warn); background: rgba(201, 138, 106, 0.08);
+  padding: 0.35rem 0.6rem; margin-top: 0.5rem; font-size: 0.82rem; font-family: var(--mono); }
 
 .alert { background: var(--gold-soft); border: 1px solid var(--warn); color: var(--warn);
          font-family: var(--mono); font-size: 0.85rem; padding: 0.6rem 0.9rem;
@@ -95,11 +98,29 @@ form label { display: block; margin: 0.45rem 0; font-size: 0.85rem; color: var(-
 input, select { width: 100%; margin-top: 0.15rem; background: var(--surface2); color: var(--ink);
   border: 1px solid var(--line); border-radius: 5px; padding: 0.45rem 0.6rem;
   font-family: var(--mono); font-size: 0.85rem; }
+input[type="range"] { accent-color: var(--gold); background: none; border: none;
+  padding: 0.25rem 0 0; cursor: pointer; }
+.val { color: var(--ink); font-family: var(--mono); font-weight: 500; float: right; }
 button { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold);
   border-radius: 5px; padding: 0.45rem 1rem; font-family: var(--mono); font-size: 0.85rem;
-  cursor: pointer; margin-top: 0.5rem; }
+  cursor: pointer; margin-top: 0.5rem; position: relative; }
 button:hover { background: rgba(200, 164, 92, 0.2); }
 button.danger { color: var(--warn); border-color: var(--warn); background: transparent; }
+.tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.7rem 0 0.2rem; }
+.tabs button { margin-top: 0; padding: 0.3rem 0.8rem; background: transparent;
+  color: var(--muted); border: 1px solid var(--line); }
+.tabs button.active { color: var(--gold); border-color: var(--gold); background: var(--gold-soft); }
+.tabs button.active[data-tab="close"] { color: var(--warn); border-color: var(--warn);
+  background: transparent; }
+#vault-facts { margin: 0.5rem 0 0.2rem; }
+button:disabled { opacity: 0.45; cursor: default; }
+/* The in-flight state: label yields to a spinner until the journal answers. */
+button.busy { color: transparent; pointer-events: none; }
+button.busy::after { content: ""; position: absolute; inset: 0; margin: auto;
+  width: 0.9em; height: 0.9em; border: 2px solid var(--gold); border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.7s linear infinite; }
+button.danger.busy::after { border-color: var(--warn); border-top-color: transparent; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 #journal { list-style: none; font-family: var(--mono); font-size: 0.78rem; max-height: 16rem;
@@ -107,5 +128,5 @@ button.danger { color: var(--warn); border-color: var(--warn); background: trans
 #journal li { padding: 0.2rem 0; border-top: 1px solid var(--line); color: var(--muted); }
 #journal li .kind { color: var(--river); margin-right: 0.6rem; }
 #journal li.rejected .kind, #journal li.op_error .kind, #journal li.keeper_error .kind { color: var(--warn); }
-#journal li.performed .kind { color: var(--ok); }
+#journal li.performed .kind, #journal li.confirmed .kind { color: var(--ok); }
 .muted { color: var(--muted); font-size: 0.85rem; }

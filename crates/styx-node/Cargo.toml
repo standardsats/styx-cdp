@@ -2,6 +2,8 @@
 name = "styx-node"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 node adapter: elementsd RPC, protocol scanning, broadcast, regtest harness"
 

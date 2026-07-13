@@ -20,6 +20,9 @@ use crate::auth::{page_gate, Gate};
 const INDEX: &str = include_str!("../assets/index.html");
 const CSS: &str = include_str!("../assets/app.css");
 const JS: &str = include_str!("../assets/app.js");
+// The explorer's meander mark with the middle bar in river blue, so an app tab and an
+// explorer tab read apart at a glance. Self-hosted: img-src stays 'self'.
+const FAVICON: &str = include_str!("../assets/favicon.svg");
 // The spec-site's faces, one source of truth (the heavy body serif is a fallback stack).
 const DIDOT_LATIN: &[u8] = include_bytes!("../../../spec-site/fonts/gfs-didot-normal-400-latin.woff2");
 const DIDOT_GREEK: &[u8] = include_bytes!("../../../spec-site/fonts/gfs-didot-normal-400-greek.woff2");
@@ -31,8 +34,8 @@ pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; 
      frame-ancestors 'none'";
 
 /// Every asset the binary serves, for the no-external-URL sweep in the fast tier.
-pub fn all_assets() -> [(&'static str, &'static str); 3] {
-    [("index.html", INDEX), ("app.css", CSS), ("app.js", JS)]
+pub fn all_assets() -> [(&'static str, &'static str); 4] {
+    [("index.html", INDEX), ("app.css", CSS), ("app.js", JS), ("favicon.svg", FAVICON)]
 }
 
 /// The hardening headers every page-tier response carries. `frame-ancestors` has no
@@ -74,6 +77,7 @@ pub fn ui_router(g: Arc<Gate>) -> Router {
         .route("/session.js", get(session))
         .route("/app.css", get(|| async { asset(CSS.as_bytes(), "text/css") }))
         .route("/app.js", get(|| async { asset(JS.as_bytes(), "text/javascript") }))
+        .route("/favicon.svg", get(|| async { asset(FAVICON.as_bytes(), "image/svg+xml") }))
         .route("/fonts/didot-latin.woff2", get(|| async { asset(DIDOT_LATIN, "font/woff2") }))
         .route("/fonts/didot-greek.woff2", get(|| async { asset(DIDOT_GREEK, "font/woff2") }))
         .route("/fonts/plex-mono-400.woff2", get(|| async { asset(PLEX_400, "font/woff2") }))

@@ -2,6 +2,8 @@
 name = "styx-core"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 pure protocol layer: units, math, frozen covenant artifacts, domain types, witness encoders"
 

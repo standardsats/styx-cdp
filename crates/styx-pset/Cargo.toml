@@ -2,6 +2,8 @@
 name = "styx-pset"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 publish = false
 description = "STYX v1 transaction builders: pure (state + intent) -> plan, sign, finalize"
 

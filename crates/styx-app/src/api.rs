@@ -325,7 +325,7 @@ async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, ApiError
             .my_vaults()
             .iter()
             .map(|v| VaultView {
-                outpoint: v.outpoint.to_string(),
+                outpoint: outpoint_str(&v.outpoint),
                 debt_units: v.state.debt.raw(),
                 collateral_sats: v.value.raw(),
                 last_height: v.state.last_height.raw(),
@@ -384,11 +384,17 @@ fn cr_percent(debt: Obol, coll: Sats, hi: Option<styx_core::units::Price>) -> Op
 
 // --- the owner ops -----------------------------------------------------------------
 
-/// `txid:vout`, the same shape the CLI prints and takes.
+/// `txid:vout`, the same shape the CLI prints and takes. Parsed via the elements
+/// `FromStr`, which also swallows the `[elements]` prefix its `Display` adds - so a
+/// pasted debug print still resolves.
 fn outpoint(s: &str) -> Result<OutPoint, ApiError> {
-    let bad = || ApiError::BadRequest(format!("vault: expected txid:vout, got {s}"));
-    let (txid, vout) = s.split_once(':').ok_or_else(bad)?;
-    Ok(OutPoint::new(txid.parse().map_err(|_| bad())?, vout.parse().map_err(|_| bad())?))
+    s.parse().map_err(|_| ApiError::BadRequest(format!("vault: expected txid:vout, got {s}")))
+}
+
+/// The plain form for responses; `OutPoint`'s own `Display` prefixes `[elements]`,
+/// which is a debug shape, not an interchange one.
+fn outpoint_str(op: &OutPoint) -> String {
+    format!("{}:{}", op.txid, op.vout)
 }
 
 fn vault_arg(v: &Option<String>) -> Result<Option<OutPoint>, ApiError> {
@@ -406,7 +412,7 @@ fn op_view(report: OpReport) -> OpView {
     OpView {
         txid: report.txid.to_string(),
         vault: report.vault.map(|v| VaultView {
-            outpoint: v.outpoint.to_string(),
+            outpoint: outpoint_str(&v.outpoint),
             debt_units: v.state.debt.raw(),
             collateral_sats: v.value.raw(),
             last_height: v.state.last_height.raw(),

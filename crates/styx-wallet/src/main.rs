@@ -9,7 +9,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use styx_core::elements::{OutPoint, Txid};
+
+use styx_core::elements::OutPoint;
 use styx_core::oracle::OracleTick;
 use styx_core::units::{BlockHeight, Obol, Sats};
 use styx_node::client::Node;
@@ -98,11 +99,14 @@ enum Cmd {
 }
 
 fn parse_outpoint(s: &str) -> Result<OutPoint, String> {
-    let (txid, vout) = s.split_once(':').ok_or("expected txid:vout")?;
-    Ok(OutPoint::new(
-        Txid::from_str(txid).map_err(|e| e.to_string())?,
-        vout.parse().map_err(|_| "bad vout".to_string())?,
-    ))
+    // The elements FromStr also swallows the `[elements]` prefix its Display adds.
+    s.parse().map_err(|_| format!("expected txid:vout, got {s}"))
+}
+
+/// The plain form for output; `OutPoint`'s own `Display` prefixes `[elements]`,
+/// which `status` takers should never have to strip.
+fn outpoint_str(op: &OutPoint) -> String {
+    format!("{}:{}", op.txid, op.vout)
 }
 
 fn vault_arg(v: &Option<String>) -> Result<Option<OutPoint>, String> {
@@ -153,7 +157,7 @@ fn print_report(label: &str, report: &styx_wallet::ops::OpReport) {
     if let Some(v) = &report.vault {
         println!(
             "vault {}: debt {} coll {} last_height {}",
-            v.outpoint,
+            outpoint_str(&v.outpoint),
             v.state.debt.raw(),
             v.value.raw(),
             v.state.last_height.raw()
@@ -216,7 +220,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             for v in &vaults {
                 println!(
                     "  {} debt {} coll {} last_height {}",
-                    v.outpoint,
+                    outpoint_str(&v.outpoint),
                     v.state.debt.raw(),
                     v.value.raw(),
                     v.state.last_height.raw()

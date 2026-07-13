@@ -34,6 +34,15 @@ cargo test -p styx-node -- --ignored   # on-node e2e (regtest)
 Without nix: rustc >= 1.88 builds the fast tiers; the e2e tier needs an elementsd built from
 the ElementsProject `simplicity` branch, pointed to by `ELEMENTSD_EXE`.
 
+## Provenance
+
+Commits and release tags are signed by the maintainer key ([charon.asc](charon.asc)):
+
+```
+Χάρων <charon@styx.network>
+53DF BF82 6E12 6804 50FD  51D6 9790 D5F0 CB43 FE12
+```
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

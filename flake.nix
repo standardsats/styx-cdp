@@ -18,6 +18,14 @@
       elementsd-simplicity =
         (import nixpkgs-elements { inherit system; }).callPackage ./nix/elementsd-simplicity.nix { };
 
+      # Re-expose the two from-source builds under the names the NixOS module reads, so the
+      # deployment hive applies this overlay to its own nixpkgs and gets the exact rev the
+      # flake pins. nostr-rs-relay comes from the consumer's nixpkgs as-is.
+      overlay = final: prev: {
+        styx = self.packages.${prev.system}.styx;
+        elementsd-simplicity = self.packages.${prev.system}.elementsd;
+      };
+
       # The workspace binaries, built hermetically from the flake's pinned inputs: the same
       # flake rev produces the same binaries, and therefore the same container layers.
       styx = pkgs.rustPlatform.buildRustPackage {
@@ -146,6 +154,12 @@
           contents = [ monitor-loop ];
         };
       };
+
+      # For self-hosting the operated stack (the deployment hive imports this). The overlay
+      # supplies `styx` and `elementsd-simplicity`; the module reads them off pkgs.
+      overlays.default = overlay;
+      nixosModules.styx-testnet = import ./nix/styx-testnet.nix;
+      nixosModules.default = self.nixosModules.styx-testnet;
 
       devShells.${system}.default = pkgs.mkShell {
         packages = [

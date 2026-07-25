@@ -7,9 +7,12 @@ source ships with the deployed artifacts, CMR-pinned).
 
 - `index.html` .. `glossary.html` - the eleven chapters.
 - `diagram.html` - the interactive architecture diagram (standalone).
-- `styles.css`, `nav.js`, `fonts.css`, `fonts/`, `assets/` - shared chrome. Fonts (GFS Didot,
+- `styles.css`, `fonts.css`, `fonts/`, `assets/` - shared chrome. Fonts (GFS Didot,
   Source Serif 4, IBM Plex Mono) are self-hosted so the site versions with the repo and works
-  offline. Navigation lives in one place, the `PAGES` list in `nav.js`.
+  offline. The sidebar and prev/next pager are static HTML repeated on every chapter, so the
+  whole spec reads and navigates with JavaScript disabled; the only scripts left are progressive
+  enhancement (source highlighting, diagram interactivity). The chapter list is frozen with v1 -
+  if a v2 ever adds pages, its own spec regenerates its own nav.
 
 Maintenance rules:
 

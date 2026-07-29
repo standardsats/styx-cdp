@@ -2,7 +2,8 @@
 
 The protocol specification for the frozen v1 covenant CDP. Plain static HTML + CSS, no build
 step: open `index.html` in a browser (works from `file://`). This site is the normative source of
-truth for v1; it references nothing beyond itself and the covenant sources. Covenant `.simf` file:line chips are fine (the covenant
+truth for v1; it references nothing beyond itself, the covenant sources, and the repository they
+live in (`github.com/standardsats/styx-cdp`). Covenant `.simf` file:line chips are fine (the covenant
 source ships with the deployed artifacts, CMR-pinned).
 
 - `index.html` .. `glossary.html` - the eleven chapters.

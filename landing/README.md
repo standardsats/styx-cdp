@@ -1,7 +1,7 @@
 # STYX landing
 
 The public entry point for the protocol: one page that routes to the specification, the
-explorer, and the covenant source. Plain static HTML + CSS, no build step, no JS - open
+explorer, the covenant source, and the code. Plain static HTML + CSS, no build step, no JS - open
 `index.html` in a browser (works from `file://`, though the cross-surface links below only
 resolve once deployed).
 
@@ -16,6 +16,7 @@ same-origin under `/spec/`, and the explorer on its own testnet host:
 - `spec/` -> the specification site (`spec-site/` in this repo).
 - `spec/source.html` -> the covenant source chapter.
 - `https://explorer.testnet.styx.network` -> the read-only explorer (matches `DEPLOY.md`).
+- `https://github.com/standardsats/styx-cdp` -> this repository (topbar, gateway card, footer).
 
 The explorer surfaces per-slot oracle freshness, so there is no separate oracle gateway -
 the oracles have no public HTTP by design (reached over the relay; admin ports stay

@@ -14,7 +14,7 @@ members = ["crates/*"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/styx-network/cdp-styx-v1"
+repository = "https://github.com/standardsats/styx-cdp"
 
 [workspace.dependencies]
 simplicityhl = { git = "https://github.com/BlockstreamResearch/SimplicityHL", rev = "63cd0924c44fc2fa0d774ef5083a3123865fb4d0" }

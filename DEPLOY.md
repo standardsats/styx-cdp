@@ -122,6 +122,12 @@ Each oracle machine runs a follower node and one daemon. Do all five, one exchan
    curl https://explorer.testnet.styx.network/config          # confirm it downloads
    ```
 
+   The same bytes go into the repository as `deploy/liquid-testnet.toml` (signed commit,
+   the second source `join-testnet.sh` falls back to), and the values it carries are
+   restated in prose on `landing/testnet.html` - genesis, the two asset ids, the issuer
+   anchor, the five oracle keys, the relay. A re-deploy changes all three; leaving one
+   behind hands users a config that resolves to addresses where nothing lives.
+
 ## 4. Explorer and monitor (infra host)
 
 1. Fill `deploy/explorer.toml.example`: its own node RPC, the published

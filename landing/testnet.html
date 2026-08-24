@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STYX testnet - the deployment record</title>
+<meta name="description" content="The published STYX deployment on Liquid testnet: genesis, asset ids, the five oracle keys, the quote relay, and the config file your wallet needs to join.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0e12'/%3E%3Cg fill='%23c8a45c'%3E%3Crect x='16' y='17' width='32' height='5'/%3E%3Crect x='21' y='29.5' width='22' height='5'/%3E%3Crect x='16' y='42' width='32' height='5'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="./">ΣΤΥ<span class="xi">Ξ</span></a>
+  <nav aria-label="Site">
+    <a href="spec/">Specification</a>
+    <a href="https://explorer.testnet.styx.network">Explorer</a>
+    <a href="testnet.html" class="here">Testnet</a>
+    <a href="spec/source.html">Source</a>
+    <a href="https://github.com/standardsats/styx-cdp">GitHub</a>
+  </nav>
+</header>
+
+<header class="pagehead">
+  <p class="kicker">Public deployment &middot; Liquid testnet</p>
+  <h1>Join the testnet</h1>
+  <p class="lede">The protocol is deployed on the public Liquid testnet with worthless coins.
+  Everything below is the result of the deployment ceremony: the two issuances, the oracle set,
+  and the relay. There is no registration and no admin key - the config is all a wallet needs.</p>
+</header>
+
+<main>
+
+<section class="section wide" id="record">
+  <h2><span class="sec">Αʹ</span>The deployment record</h2>
+
+  <p>The ceremony ran once, at block 2,518,440 (2026-07-07). It issued 100,000,000 OBOL into the
+  pot and one identity-token unit into the issuer, both without a reissuance token, and seeded the
+  stability reserve. None of it can be repeated or revoked; a new deployment would be a different
+  set of asset ids.</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td><b>Chain</b></td><td class="hex">liquidtestnet</td></tr>
+    <tr><td><b>Genesis</b></td>
+        <td class="hex">a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1</td></tr>
+    <tr><td><b>OBOL</b></td>
+        <td class="hex">814cc30aca6b188ac22accffc503e7bc4c052a8b6916e59f869f1247f87d31b6</td></tr>
+    <tr><td><b>Identity token</b></td>
+        <td class="hex">feb3d9c9f2a9aaab816c2e93cfd4479f841b8e05596b8418ed0fd56e0b8d2e6d</td></tr>
+    <tr><td><b>Collateral (tL-BTC)</b></td>
+        <td class="hex">144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49</td></tr>
+    <tr><td><b>Issuer anchor</b></td><td class="hex">2518440</td></tr>
+    <tr><td><b>Quote relay</b></td><td class="hex">wss://relay.testnet.styx.network</td></tr>
+  </table></div>
+
+  <p>The issuer anchor is also the scan floor: a wallet indexes the chain from that height, so your
+  node has to be synced past it before any command works. The collateral asset is the testnet peg
+  asset, which your node reports as <code>pegged_asset</code>.</p>
+</section>
+
+<section class="section wide" id="oracles">
+  <h2><span class="sec">Βʹ</span>The oracle set</h2>
+
+  <p>Five keys, fixed at compile time inside the vault covenant: changing the set would change the
+  vault CMR and therefore every address in the deployment. Three of the five sign a price tick; the
+  protocol key verifies the quote inside the covenant, the nostr key identifies the publisher on the
+  relay.</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Slot</th><th>Protocol key</th><th>Nostr key</th></tr>
+    <tr><td class="num">0</td>
+        <td class="hex">cb58a1a707702cbbe9ba172ab9bc3b83e2d91bc61b39d496b9663c37bb1b0bfa</td>
+        <td class="hex">55408697ab1d13b9330b00c908e5d87b59482b1bcf98bbce4b56e76c5c9bb90b</td></tr>
+    <tr><td class="num">1</td>
+        <td class="hex">fff79bda2df574c7c08b981ec2302b1114bf140b72a0177158af7140a99b37a6</td>
+        <td class="hex">3b21bac52d8920fbe5a80dc8b5b1af8e9581a8181ec77643508a519646f0402a</td></tr>
+    <tr><td class="num">2</td>
+        <td class="hex">c71d4ebfa0e7b88bc188cd3227e290e5daa8dc109594830b68aabbb1d0d72261</td>
+        <td class="hex">66b8446d6dd79a749628f54695056028bcf7bd65a3de0fb2d8ed2caf7a8e3daf</td></tr>
+    <tr><td class="num">3</td>
+        <td class="hex">61fe5be2db7c5b6168de3f343bca8af5e3e8c82e7c6232e03bc28671335af382</td>
+        <td class="hex">55fe45679e0d89e262b7134d974cba09e18158b32793d91344ba20590339f541</td></tr>
+    <tr><td class="num">4</td>
+        <td class="hex">ac8e7446463ae1b5e87b0c4528a047478113decc1c8f3a0b74de67b4428e0337</td>
+        <td class="hex">8803ba11104216f5a07b10f0824956a00dcbcf9c877df50ffdb8df253415222d</td></tr>
+  </table></div>
+
+  <p>Per-slot freshness is visible in the <a href="https://explorer.testnet.styx.network">explorer</a>.
+  The oracles have no public HTTP: they publish over the relay, and their admin ports stay on
+  loopback.</p>
+</section>
+
+<section class="section wide" id="config">
+  <h2><span class="sec">Γʹ</span>The config file</h2>
+
+  <p>Those values ship as one file, <code>liquid-testnet.toml</code>, which every role reads - the
+  wallet, the app, the keeper, the explorer. Two places serve the same bytes:</p>
+
+  <ul class="plain">
+    <li><a href="https://explorer.testnet.styx.network/config">explorer.testnet.styx.network/config</a>
+    - what <code>deploy/join-testnet.sh</code> downloads.</li>
+    <li><a href="https://github.com/standardsats/styx-cdp/blob/master/deploy/liquid-testnet.toml">deploy/liquid-testnet.toml</a>
+    in the repository - the same file under a signed commit.</li>
+  </ul>
+
+  <p>Compare them if you like; they are byte-identical, and the record above is the same data in
+  prose. Tampering is not much of a threat anyway: your wallet cross-checks the config's genesis
+  against your own node and refuses to sign against a chain that disagrees, and every address in the
+  deployment is derived from the asset ids and the oracle keys, so a wrong file produces addresses
+  where nothing lives.</p>
+</section>
+
+<section class="section wide" id="join">
+  <h2><span class="sec">Δʹ</span>Joining</h2>
+
+  <p>One idempotent script writes <code>~/.styx</code>: a node dir with generated RPC credentials,
+  your keys, the config above, and one <code>app.toml</code> that both the app and the CLI read.</p>
+
+<pre><code>git clone https://github.com/standardsats/styx-cdp &amp;&amp; cd styx-cdp
+nix develop
+deploy/join-testnet.sh</code></pre>
+
+  <p>It ends by printing what it cannot do for you, in order: start the node, wait for the sync to
+  pass block 2,518,440, point a Liquid-testnet faucet at your funding address, run the app. First
+  sync takes a few hours. The long way, section by section, is in
+  <a href="https://github.com/standardsats/styx-cdp/blob/master/TESTNET.md">TESTNET.md</a>.</p>
+
+  <div class="note"><span class="lbl">What is operated, and what is not</span>
+  <p>The covenants are frozen and hold the money; nobody can move it outside the rules, including
+  whoever runs this deployment. The oracles and the relay are operated, so a stalled feed stops new
+  operations - it cannot take collateral. Testnet coins are worthless and the deployment may be
+  re-run without warning.</p></div>
+</section>
+
+</main>
+
+<footer>
+  <div class="meander"></div>
+  <p class="epigraph">An obol buys the crossing or it does not.
+  There is no negotiating with the covenant.</p>
+  <p class="fine"><a href="https://github.com/standardsats/styx-cdp">github.com/standardsats/styx-cdp</a> &middot; MIT / Apache-2.0</p>
+  <p class="fine">quote relay &middot; wss://relay.testnet.styx.network</p>
+  <p class="fine">covenant frozen 2026-07-03 &middot; CMR-pinned source &middot; no admin key exists</p>
+</footer>
+
+</body>
+</html>

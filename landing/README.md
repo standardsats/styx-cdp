@@ -17,6 +17,10 @@ same-origin under `/spec/`, and the explorer on its own testnet host:
 - `spec/source.html` -> the covenant source chapter.
 - `https://explorer.testnet.styx.network` -> the read-only explorer (matches `DEPLOY.md`).
 - `https://github.com/standardsats/styx-cdp` -> this repository (topbar, gateway card, footer).
+- `testnet.html` -> the deployment record: the ceremony result in prose (genesis, asset ids,
+  issuer anchor, the five oracle keys, the relay) and where to get `liquid-testnet.toml`.
+  Its values are a copy of `deploy/liquid-testnet.toml`, so a re-deploy has to update both -
+  the publish step in `DEPLOY.md` lists every place.
 
 The explorer surfaces per-slot oracle freshness, so there is no separate oracle gateway -
 the oracles have no public HTTP by design (reached over the relay; admin ports stay

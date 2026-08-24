@@ -55,13 +55,25 @@ else
 fi
 
 # --- the published deployment config -----------------------------------------------------
+# Two sources carry the same bytes: the download URL the docs point at, and this checkout
+# (deploy/liquid-testnet.toml, under a signed commit). Prefer the download, fall back to the
+# checkout, and say so when the two disagree - that means one of them is stale.
+REPO_CONFIG="$ROOT/deploy/liquid-testnet.toml"
 if [ -e "$DIR/liquid-testnet.toml" ]; then
   log "keeping the existing deployment config: $DIR/liquid-testnet.toml"
-else
-  curl -fsS "$EXPLORER/config" -o "$DIR/liquid-testnet.toml"
-  grep -q 'chain = "liquidtestnet"' "$DIR/liquid-testnet.toml" \
+elif curl -fsS "$EXPLORER/config" -o "$DIR/liquid-testnet.toml.part"; then
+  grep -q 'chain = "liquidtestnet"' "$DIR/liquid-testnet.toml.part" \
     || { echo "$EXPLORER/config did not return a liquidtestnet config"; exit 1; }
+  mv "$DIR/liquid-testnet.toml.part" "$DIR/liquid-testnet.toml"
   log "deployment config downloaded: $DIR/liquid-testnet.toml"
+  if ! diff -q "$REPO_CONFIG" "$DIR/liquid-testnet.toml" >/dev/null 2>&1; then
+    log "WARNING: it does not match $REPO_CONFIG"
+    log "         compare the two before you fund anything:"
+    log "         diff $REPO_CONFIG $DIR/liquid-testnet.toml"
+  fi
+else
+  cp "$REPO_CONFIG" "$DIR/liquid-testnet.toml"
+  log "$EXPLORER/config unreachable - took the copy from this checkout: $REPO_CONFIG"
 fi
 
 # --- app.toml (styx-app and styx-wallet read the same file) ------------------------------

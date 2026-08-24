@@ -19,7 +19,7 @@ Liquid-testnet node, and the published config.
 Everything in sections 1-5a, one idempotent command:
 
 ```bash
-git clone https://github.com/styx-network/cdp-styx-v1 && cd cdp-styx-v1
+git clone https://github.com/standardsats/styx-cdp && cd styx-cdp
 nix develop
 deploy/join-testnet.sh
 ```
@@ -33,7 +33,7 @@ prints again. Walk sections 1-5 instead when you want to see each piece.
 ## 1. Binaries and node
 
 ```bash
-git clone https://github.com/styx-network/cdp-styx-v1 && cd cdp-styx-v1
+git clone https://github.com/standardsats/styx-cdp && cd styx-cdp
 nix develop            # rustc, cargo, and the Simplicity-capable elementsd
 cargo build --release
 export BIN=$PWD/target/release
@@ -59,11 +59,18 @@ elements-cli -datadir=~/.styx/node getdeploymentinfo | grep -A3 simplicity
 
 ## 2. The deployment config
 
-Download the published `liquid-testnet.toml` from
-**https://explorer.testnet.styx.network/config** - it carries the genesis, the asset ids,
-the five oracle keys, and the relay address (`wss://relay.testnet.styx.network`). Your
-wallet cross-checks the genesis against your node before signing anything, so a wrong or
-tampered file refuses to act rather than misbehave.
+The ceremony result - the genesis, the asset ids, the five oracle keys, and the relay
+address (`wss://relay.testnet.styx.network`) - is one file, `liquid-testnet.toml`. Two
+sources carry the same bytes:
+
+- **https://explorer.testnet.styx.network/config** - what `join-testnet.sh` downloads.
+- [`deploy/liquid-testnet.toml`](deploy/liquid-testnet.toml) in this checkout - the same
+  file under a signed commit.
+
+`diff` them if you like. The same values in prose, plus what the ceremony did, are at
+**https://styx.network/testnet.html**. Your wallet cross-checks the config's genesis
+against your node before signing anything, so a wrong or tampered file refuses to act
+rather than misbehave.
 
 ## 3. Keys and the funding drop
 

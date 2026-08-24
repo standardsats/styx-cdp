@@ -1,0 +1,44 @@
+[network]
+chain = "liquidtestnet"
+genesis = "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1"
+
+[assets]
+obol = "814cc30aca6b188ac22accffc503e7bc4c052a8b6916e59f869f1247f87d31b6"
+issuer_token = "feb3d9c9f2a9aaab816c2e93cfd4479f841b8e05596b8418ed0fd56e0b8d2e6d"
+policy = "144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49"
+
+[protocol]
+issuer_anchor_genesis = 2518440
+
+[[oracles]]
+slot = 0
+protocol_pk = "cb58a1a707702cbbe9ba172ab9bc3b83e2d91bc61b39d496b9663c37bb1b0bfa"
+nostr_pk = "55408697ab1d13b9330b00c908e5d87b59482b1bcf98bbce4b56e76c5c9bb90b"
+admin_url = "http://127.0.0.1:9700"
+
+[[oracles]]
+slot = 1
+protocol_pk = "fff79bda2df574c7c08b981ec2302b1114bf140b72a0177158af7140a99b37a6"
+nostr_pk = "3b21bac52d8920fbe5a80dc8b5b1af8e9581a8181ec77643508a519646f0402a"
+admin_url = "http://127.0.0.1:9701"
+
+[[oracles]]
+slot = 2
+protocol_pk = "c71d4ebfa0e7b88bc188cd3227e290e5daa8dc109594830b68aabbb1d0d72261"
+nostr_pk = "66b8446d6dd79a749628f54695056028bcf7bd65a3de0fb2d8ed2caf7a8e3daf"
+admin_url = "http://127.0.0.1:9702"
+
+[[oracles]]
+slot = 3
+protocol_pk = "61fe5be2db7c5b6168de3f343bca8af5e3e8c82e7c6232e03bc28671335af382"
+nostr_pk = "55fe45679e0d89e262b7134d974cba09e18158b32793d91344ba20590339f541"
+admin_url = "http://127.0.0.1:9703"
+
+[[oracles]]
+slot = 4
+protocol_pk = "ac8e7446463ae1b5e87b0c4528a047478113decc1c8f3a0b74de67b4428e0337"
+nostr_pk = "8803ba11104216f5a07b10f0824956a00dcbcf9c877df50ffdb8df253415222d"
+admin_url = "http://127.0.0.1:9704"
+
+[nostr]
+relays = ["wss://relay.testnet.styx.network"]

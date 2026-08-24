@@ -17,6 +17,11 @@ no multisig, federation, or admin keys.
   UI for the wallet and the keeper), or the CLI, against the public Liquid-testnet
   deployment - `deploy/join-testnet.sh` sets it all up, then faucet, a vault, and hunting
   other people's positions.
+- [`deploy/liquid-testnet.toml`](deploy/liquid-testnet.toml) - the public testnet's
+  deployment config, exactly as published: genesis, the two asset ids, the issuer anchor,
+  the five oracle keys, the relay. The same bytes are served at
+  <https://explorer.testnet.styx.network/config>, and the record reads in prose at
+  <https://styx.network/testnet.html>.
 - [SETUP.md](SETUP.md) - multi-machine network bring-up; `deploy/swarm.sh` rehearses the
   whole topology on one host.
 - [DEPLOY.md](DEPLOY.md) - the operator's deploy-day runbook for the public testnet

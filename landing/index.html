@@ -134,6 +134,22 @@
   </div>
 </section>
 
+<section class="section" id="provenance">
+  <h2><span class="sec">Δʹ</span>Provenance</h2>
+  <p>Every commit and every release tag is signed with one key. Nothing here asks you to trust
+  a binary someone else built: import the key, check the history you cloned, build it yourself.</p>
+
+<pre><code>curl -sO https://styx.network/charon.asc &amp;&amp; gpg --import charon.asc
+git log --show-signature -1        # or: git verify-commit HEAD</code></pre>
+
+  <div class="keycard">
+    <p class="who">Χάρων &lt;charon@styx.network&gt;</p>
+    <p class="fpr">53DF BF82 6E12 6804 50FD&nbsp; 51D6 9790 D5F0 CB43 FE12</p>
+    <p class="meta">ed25519 &middot; 2026-07-13, expires 2029-07-12 &middot;
+    <a href="charon.asc">charon.asc</a></p>
+  </div>
+</section>
+
 </main>
 
 <footer>
@@ -141,6 +157,7 @@
   <p class="epigraph">An obol buys the crossing or it does not.
   There is no negotiating with the covenant.</p>
   <p class="fine"><a href="https://github.com/standardsats/styx-cdp">github.com/standardsats/styx-cdp</a> &middot; MIT / Apache-2.0</p>
+  <p class="fine">signing key &middot; <a href="charon.asc">53DF BF82 6E12 6804 50FD&nbsp; 51D6 9790 D5F0 CB43 FE12</a></p>
   <p class="fine">quote relay &middot; wss://relay.testnet.styx.network</p>
   <p class="fine">covenant frozen 2026-07-03 &middot; CMR-pinned source &middot; no admin key exists</p>
 </footer>

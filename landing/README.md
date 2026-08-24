@@ -17,6 +17,9 @@ same-origin under `/spec/`, and the explorer on its own testnet host:
 - `spec/source.html` -> the covenant source chapter.
 - `https://explorer.testnet.styx.network` -> the read-only explorer (matches `DEPLOY.md`).
 - `https://github.com/standardsats/styx-cdp` -> this repository (topbar, gateway card, footer).
+- `charon.asc` -> the maintainer's public key, a copy of the one in the repo root. Served at
+  the apex so `curl -sO https://styx.network/charon.asc` works; the fingerprint printed in the
+  Provenance section must match it (`gpg --import-options show-only --import charon.asc`).
 - `testnet.html` -> the deployment record: the ceremony result in prose (genesis, asset ids,
   issuer anchor, the five oracle keys, the relay) and where to get `liquid-testnet.toml`.
   Its values are a copy of `deploy/liquid-testnet.toml`, so a re-deploy has to update both -

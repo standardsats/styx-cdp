@@ -343,6 +343,31 @@ h2 .sec { color: var(--gold-dim); font-size: 17px; margin-right: 14px; letter-sp
 }
 .gate:hover .go { color: var(--gold); }
 
+/* ---------- signing key ---------- */
+
+.keycard {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 18px 22px 14px;
+}
+.keycard .who { font-size: 16px; color: var(--ink); margin-bottom: 8px; }
+.keycard .fpr {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  margin-bottom: 10px;
+  overflow-x: auto;
+}
+.keycard .meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin: 0;
+}
+
 /* ---------- inner pages (testnet record) ---------- */
 
 .topbar nav a.here { color: var(--gold); }
